@@ -6,6 +6,9 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+- If Ollama hangs, search falls back to keywords after 15 seconds instead of waiting
+  for the full model timeout (120 s by default).
+
 - `share_file` no longer uploads a second copy when asked again before the next Drive
   sync: it checks its Drive folder for the same checksum first.
 

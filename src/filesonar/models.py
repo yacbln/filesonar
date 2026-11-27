@@ -69,6 +69,9 @@ def drop_absence_sentences(text: str) -> str:
     return " ".join(kept) if kept else text.strip()
 
 
+QUERY_TIMEOUT_SECONDS = 15.0
+
+
 class ModelError(RuntimeError):
     pass
 
@@ -100,9 +103,12 @@ class OllamaClient:
             trust_env=False,
         )
 
-    def _post(self, route: str, payload: dict) -> dict:
+    def _post(self, route: str, payload: dict, timeout: float | None = None) -> dict:
         try:
-            resp = self.http.post(route, json=payload)
+            if timeout is None:
+                resp = self.http.post(route, json=payload)
+            else:
+                resp = self.http.post(route, json=payload, timeout=timeout)
         except httpx.HTTPError as exc:
             raise ModelError(f"cannot reach Ollama at {self.cfg.host}: {exc}") from exc
         if resp.status_code != 200:
@@ -146,12 +152,12 @@ class OllamaEmbedder:
         base = self.name.split(":")[0]
         self._doc_prefix, self._query_prefix = _PREFIXES.get(base, ("", ""))
 
-    def _embed(self, texts: Sequence[str]) -> list[list[float]]:
+    def _embed(self, texts: Sequence[str], timeout: float | None = None) -> list[list[float]]:
         out: list[list[float]] = []
         for start in range(0, len(texts), self.batch_size):
             batch = list(texts[start : start + self.batch_size])
             data = self.client._post(
-                "/api/embed", {"model": self.name, "input": batch, "truncate": True}
+                "/api/embed", {"model": self.name, "input": batch, "truncate": True}, timeout
             )
             vectors = data.get("embeddings")
             if not isinstance(vectors, list) or len(vectors) != len(batch):
@@ -163,7 +169,11 @@ class OllamaEmbedder:
         return self._embed([self._doc_prefix + t for t in texts])
 
     def embed_query(self, text: str) -> list[float]:
-        return self._embed([self._query_prefix + text])[0]
+        # Someone is waiting for this answer. Embedding a query takes milliseconds, plus
+        # a few seconds if Ollama has to load the model; if it takes longer than this,
+        # search answers with keywords alone rather than keep the user waiting.
+        timeout = min(QUERY_TIMEOUT_SECONDS, self.client.cfg.timeout_seconds)
+        return self._embed([self._query_prefix + text], timeout=timeout)[0]
 
 
 class OllamaCaptioner:

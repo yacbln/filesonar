@@ -175,3 +175,27 @@ def test_caption_prompt_lists_no_categories():
 
     assert "receipt" not in CAPTION_PROMPT and "diagram" not in CAPTION_PROMPT
     assert "absent" in CAPTION_PROMPT and "instructions" in CAPTION_PROMPT
+
+
+def test_queries_use_a_short_timeout_documents_the_configured_one():
+    """Found with a hung Ollama: a search waited the full 120 s caption timeout."""
+    from filesonar.models import QUERY_TIMEOUT_SECONDS
+
+    timeouts = []
+
+    def handler(request):
+        timeouts.append(request.extensions["timeout"]["read"])
+        return httpx.Response(200, json={"embeddings": [[0.1, 0.2]]})
+
+    config = ModelConfig(timeout_seconds=120)
+    real_timeouts = OllamaClient(config).http.timeout  # what filesonar really configures
+    http = httpx.Client(
+        base_url=config.host, transport=httpx.MockTransport(handler), timeout=real_timeouts
+    )
+    emb = OllamaEmbedder(OllamaClient(config, client=http))
+    emb.embed_query("q")
+    emb.embed_documents(["d"])
+    assert timeouts == [QUERY_TIMEOUT_SECONDS, 120]  # documents keep the long limit
+    short = OllamaEmbedder(client_with(handler, timeout_seconds=5))
+    short.embed_query("q")
+    assert timeouts[-1] == 5  # never longer than the configured limit

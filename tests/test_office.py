@@ -308,3 +308,19 @@ def test_placeholder_titles_are_not_indexed(tmp_path):
     assert extract(p, IX).details is None
     p = pptx(tmp_path / "d.pptx", [["hi"]], title="Untitled", author="Sam")
     assert extract(p, IX).details == "author: Sam; slides: 1"
+
+
+@pytest.mark.parametrize("depth", [500, 50_000])
+def test_deeply_nested_document_reads_or_fails_cleanly(tmp_path, depth):
+    """Hostile nesting must not crash the indexer (recursion limits, parser limits)."""
+    nested = "<text:section>" * depth + "<text:p>deep</text:p>" + "</text:section>" * depth
+    content = (
+        f"<office:document-content {ODF}><office:body><office:text>{nested}"
+        "</office:text></office:body></office:document-content>"
+    )
+    p = zip_file(tmp_path / "deep.odt", {"content.xml": content})
+    try:
+        out = extract(p, IX)
+    except ExtractionError:
+        return  # refused: fine
+    assert text_of(out) == "deep"

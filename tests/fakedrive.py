@@ -188,6 +188,9 @@ class FakeDrive:
             return False
         if "'me' in owners" in q and not f.owned:
             return False
+        parent = re.search(r"'([^']+)' in parents", q)
+        if parent and parent.group(1) not in f.parents:
+            return False
         m = re.search(r"name = '((?:[^'\\]|\\.)*)'", q)
         return not (m and f.name != m.group(1).replace("\\'", "'").replace("\\\\", "\\"))
 

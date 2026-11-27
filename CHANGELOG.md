@@ -6,6 +6,9 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+- `share_file` no longer uploads a second copy when asked again before the next Drive
+  sync: it checks its Drive folder for the same checksum first.
+
 - Better ranking when a few rare words identify a file: the reciprocal rank fusion
   constant goes from 60 to 5. On a real 16,000-file index, top-3 recall for such
   queries rose from 64-76% to 86-95% (Google Drive: 48-61% to 86-100%), with no loss

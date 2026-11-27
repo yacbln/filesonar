@@ -353,6 +353,18 @@ def test_share_file_uploads_once_into_its_folder(dserver, fake, dcfg, ddb, embed
     assert fake.files[fake.uploads[2]].parents != [folder.id]
 
 
+def test_share_file_twice_before_a_sync_uploads_once(dserver, fake, dcfg, ddb, embedder, home):
+    """Found on a real Drive: asking again before the next sync uploaded a duplicate."""
+    from filesonar.indexer import Indexer
+
+    (home / "report.txt").write_bytes(b"annual report")
+    Indexer(dcfg, ddb, embedder).run()
+    first = call(dserver, "share_file", {"path": str(home / "report.txt")})
+    second = call(dserver, "share_file", {"path": str(home / "report.txt")})
+    assert first["uploaded"] is True and second["uploaded"] is False
+    assert second["link"] == first["link"] and len(fake.uploads) == 1
+
+
 def test_share_file_refuses_unindexed_paths(dserver, tmp_path):
     secret = tmp_path / "secret.txt"
     secret.write_text("x")

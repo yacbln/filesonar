@@ -298,6 +298,19 @@ def build_server(
                         "note": "This file was already in Google Drive.",
                     }
             folder = share_folder(client)
+            # A file uploaded moments ago is not in the index until the next sync, so
+            # ask Drive directly before uploading the same content again.
+            for item in client.list_files(
+                f"'{folder}' in parents and trashed = false",
+                fields="id,name,md5Checksum,webViewLink",
+            ):
+                if item.get("md5Checksum") == md5:
+                    return {
+                        "link": item.get("webViewLink"),
+                        "name": item.get("name"),
+                        "uploaded": False,
+                        "note": "This file was already shared before.",
+                    }
             mime = mimetypes.guess_type(row["name"])[0] or "application/octet-stream"
             info = client.upload(row["name"], data, mime, folder)
         except DriveError as exc:

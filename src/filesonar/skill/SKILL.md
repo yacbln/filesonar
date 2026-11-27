@@ -56,11 +56,16 @@ names say nothing about their content (`IMG_2041.jpg`, `scan0003.pdf`).
    returns with your normal message/media tool. This works for photos, PDFs and
    documents alike, on the computer or in Drive; PDFs and documents arrive as a file
    the user can tap to open.
-6. When the user asks for a link, or the file is too large to attach (chat apps carry
-   about 50 MB; `prepare_file` refuses larger files and says so): for a Drive result,
-   give its `link`. For a file on the computer, call `share_file`; it returns a Drive
-   link, uploading a copy only if Drive does not have the file yet. Links open only
-   for the user. Without Google Drive, tell the user where the file is.
+6. Files over about 50 MB (long videos, mostly) are too large for a chat message.
+   For those, `prepare_file` copies nothing and returns `too_large_for_chat`:
+   - with a `link`: the file is already in the user's Google Drive. Send the link and
+     say the file was too large to attach. Nothing was uploaded.
+   - with `in_drive: false`: ask the user first, for example "This video is 120 MB,
+     too large for WhatsApp. Shall I upload a copy to your Google Drive and send you
+     the link?" Only if they say yes, call `share_file` and send the link it returns.
+   - with a `path` (no Google Drive): tell the user where the file is on their computer.
+   When the user asks for a link to a file on the computer, call `share_file`; it
+   uploads only if Drive does not have the file yet. Links open only for the user.
 7. When the user wants a Drive file on their computer ("download it", "save it to my
    laptop"), call `save_to_computer`. It saves into their Downloads folder without
    overwriting anything, or tells you the file is already on the computer.

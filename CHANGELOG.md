@@ -6,6 +6,11 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+- Files over the chat limit are no longer uploaded without asking. `prepare_file`
+  looks for a copy already in the user's Google Drive (read-only, so no approval
+  prompt) and returns its link; if there is none, it tells the agent to ask the user
+  before calling `share_file`. It returns this as a result rather than an error.
+
 ## [0.3.0] - 2026-11-27
 
 - Audio and video: what is said (speech recognition on this computer with

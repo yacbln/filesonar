@@ -59,12 +59,55 @@ def add_local_video(db, path, size):
     )  # fmt: skip
 
 
-def test_prepare_file_says_when_a_video_is_too_big_for_chat(setup, home):
+def test_too_big_video_not_in_drive_asks_before_uploading(setup, home, fake):
     cfg, db, server, _ = setup
     add_local_video(db, home / "party.mp4", 3 * 1024 * 1024)
-    msg = call_error(server, "prepare_file", {"path": str(home / "party.mp4")})
-    assert "more than chat apps send (2 MB)" in msg and "share_file" in msg
+    out = call(server, "prepare_file", {"path": str(home / "party.mp4")})
+    assert out["too_large_for_chat"] is True and out["in_drive"] is False
+    assert out["size_mb"] == 3 and out["chat_limit_mb"] == 2
+    assert "Ask the user" in out["note"] and "share_file" in out["note"]
+    assert fake.uploads == [] and not fake.folders()  # nothing uploaded, no folder made
     assert not cfg.outbox_dir.exists() or not any(cfg.outbox_dir.iterdir())
+
+
+def test_too_big_video_already_in_drive_gets_its_link_without_uploading(setup, home, fake):
+    _, db, server, drive = setup
+    video = home / "party.mp4"
+    add_local_video(db, video, 3 * 1024 * 1024)
+    import hashlib
+
+    md5 = hashlib.md5(video.read_bytes()).hexdigest()
+    db.conn.execute("UPDATE files SET md5 = ? WHERE path = ?", (md5, str(video)))
+    f = fake.add("Phone backup of party.mp4", video.read_bytes())  # same bytes, other name
+    drive.sync()
+    out = call(server, "prepare_file", {"path": str(video)})
+    assert out["link"] == f"https://drive.google.com/file/d/{f.id}/view"
+    assert "Nothing was uploaded" in out["note"] and fake.uploads == []
+
+
+def test_too_big_video_shared_before_is_found_even_before_the_next_sync(setup, home, fake):
+    _, db, server, _ = setup
+    video = home / "party.mp4"
+    add_local_video(db, video, 3 * 1024 * 1024)
+    import hashlib
+
+    db.conn.execute(
+        "UPDATE files SET md5 = ? WHERE path = ?",
+        (hashlib.md5(video.read_bytes()).hexdigest(), str(video)),
+    )
+    first = call(server, "share_file", {"path": str(video)})  # the user said yes once
+    assert first["uploaded"] is True
+    out = call(server, "prepare_file", {"path": str(video)})  # asked again later
+    assert out["link"] == first["link"] and len(fake.uploads) == 1
+
+
+def test_too_big_without_drive_says_where_the_file_is(make_cfg, home, embedder):
+    cfg = make_cfg(outbox_max_mb=2)
+    db = Database(cfg.db_path)
+    add_local_video(db, home / "party.mp4", 3 * 1024 * 1024)
+    out = call(build_server(cfg, db, embedder), "prepare_file", {"path": str(home / "party.mp4")})
+    assert out["path"] == str(home / "party.mp4") and "not set up" in out["note"]
+    db.close()
 
 
 def test_small_video_is_prepared_even_above_the_index_size_limit(setup, home):
@@ -88,8 +131,9 @@ def test_drive_video_too_big_for_chat_points_to_its_link(setup, fake):
     _, _, server, drive = setup
     f = fake.add("trip.mp4", b"x" * 10, size=str(300 * 1024 * 1024))
     drive.sync()
-    msg = call_error(server, "prepare_file", {"path": KEY_PREFIX + f.id})
-    assert "Google Drive link" in msg and f"/file/d/{f.id}/" in msg
+    out = call(server, "prepare_file", {"path": KEY_PREFIX + f.id})
+    assert out["too_large_for_chat"] and f"/file/d/{f.id}/" in out["link"]
+    assert f.id not in fake.downloads
 
 
 # -- save_to_computer ------------------------------------------------------------------

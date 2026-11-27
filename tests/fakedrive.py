@@ -90,6 +90,9 @@ class FakeDrive:
     def folder(self, name: str, parent: str = ROOT, **kw) -> FakeFile:
         return self.add(name, mime=FOLDER_MIME, parent=parent, **kw)
 
+    def folders(self) -> list[str]:
+        return [f.name for f in self.files.values() if f.mime == FOLDER_MIME]
+
     def touch(self, file_id: str, **changes) -> None:
         f = self.files[file_id]
         for key, value in changes.items():

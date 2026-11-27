@@ -267,7 +267,13 @@ def cmd_drive(cfg: Config, args: argparse.Namespace) -> int:
         print(f"signed in as {token.account}; token saved to {path}")
         if not cfg.drive.enabled:
             print(f"now set `enabled = true` under [drive] in {cfg.source}")
-        print("then run: filesonar index")
+        db = Database(cfg.db_path)
+        try:
+            first_time = not db.stats().get("drive_files")
+        finally:
+            db.close()
+        if first_time:
+            print("then run: filesonar index")
         return 0
 
     if args.drive_command == "logout":

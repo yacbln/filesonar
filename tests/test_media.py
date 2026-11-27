@@ -287,7 +287,7 @@ class _Info:
 
 
 def whisper_with(monkeypatch, segments, info):
-    import numpy as np
+    np = pytest.importorskip("numpy")  # comes with the speech-recognition extra
 
     t = media.WhisperTranscriber("base", Path("/nonexistent"))
 

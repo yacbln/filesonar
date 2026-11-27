@@ -472,7 +472,7 @@ def main(argv: list[str] | None = None) -> int:
         format="%(levelname)s %(message)s",
         stream=sys.stderr,
     )
-    for noisy in ("httpx", "httpcore", "PIL", "watchdog", "pytesseract"):
+    for noisy in ("httpx", "httpcore", "PIL", "watchdog", "pytesseract", "faster_whisper"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
     if args.command == "init":
         return cmd_init(args)

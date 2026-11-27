@@ -789,9 +789,16 @@ class Uninstall(Setup):
             import shutil
 
             for entry in models.iterdir():
-                ours = entry.name.startswith("models--") or entry.name == ".locks"
-                if ours and entry.is_dir() and not entry.is_symlink():
+                if entry.is_symlink():
+                    continue
+                if entry.is_dir() and (
+                    entry.name.startswith("models--")
+                    or entry.name == ".locks"
+                    or (entry.name == "blobs" and (entry / ".huggingface-shared-blobs").exists())
+                ):
                     shutil.rmtree(entry)
+                elif entry.name == "CACHEDIR.TAG" and "huggingface" in entry.read_text()[:500]:
+                    entry.unlink()
             with contextlib.suppress(OSError):
                 models.rmdir()
             self.ok("deleted the speech model")

@@ -599,7 +599,10 @@ def test_uninstall_deletes_the_speech_model_with_the_data(env, monkeypatch):
     models = load_config(env.config).models_dir
     (models / "models--Systran--faster-whisper-base").mkdir(parents=True)
     (models / "models--Systran--faster-whisper-base" / "model.bin").write_bytes(b"x")
+    (models / "blobs" / "0c").mkdir(parents=True)  # newer huggingface_hub layout
+    (models / "blobs" / ".huggingface-shared-blobs").write_text("")
+    (models / "CACHEDIR.TAG").write_text("Signature: x\n# created by huggingface_hub.\n")
     (models / "my-notes.txt").write_text("not filesonar's")
+    (models / "other").mkdir()
     assert env(Options(), cls=Uninstall, purge=True).main() == 0
-    assert not (models / "models--Systran--faster-whisper-base").exists()
-    assert (models / "my-notes.txt").exists()  # only what filesonar downloaded
+    assert sorted(p.name for p in models.iterdir()) == ["my-notes.txt", "other"]

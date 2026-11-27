@@ -26,7 +26,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends tesseract-ocr fonts-dejavu-core ffmpeg
       - name: Test
         run: |
-          pip install -e ".[dev]"
+          pip install -e ".[dev,media]"
           ruff check .
           pytest
       - name: Build

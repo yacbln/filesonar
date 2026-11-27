@@ -143,9 +143,8 @@ def duration_text(seconds: float) -> str:
 
 
 def decode_audio(fd: int, max_seconds: float):
-    """Mono 16 kHz float32 samples of at most ``max_seconds`` (numpy array)."""
-    import numpy as np  # comes with the media extra
-
+    """Mono 16 kHz float32 samples of at most ``max_seconds``: a numpy array when numpy
+    is installed (it comes with the speech-recognition extra), else an ``array``."""
     limit = int(max_seconds * SAMPLE_RATE) * 4
     pcm = _run(
         ["ffmpeg", "-nostdin", "-v", "error", "-i", _fd_path(fd), "-t", str(int(max_seconds)),
@@ -155,6 +154,14 @@ def decode_audio(fd: int, max_seconds: float):
         max_output=limit,
     )  # fmt: skip
     usable = len(pcm) - len(pcm) % 4
+    try:
+        import numpy as np
+    except ImportError:
+        import array
+
+        samples = array.array("f")
+        samples.frombytes(pcm[:usable])
+        return samples
     return np.frombuffer(pcm[:usable], dtype=np.float32)
 
 

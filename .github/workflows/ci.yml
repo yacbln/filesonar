@@ -23,7 +23,7 @@ jobs:
       - name: Install system packages
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends tesseract-ocr fonts-dejavu-core ffmpeg
       - name: Install
-        run: pip install -e ".[dev]"
+        run: pip install -e ".[dev,media]"
       - name: Lint
         run: |
           ruff check .

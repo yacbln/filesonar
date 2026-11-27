@@ -6,6 +6,11 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+- Search results carry the sending rule themselves (`how_to_send`) and flag files too
+  large for a chat (`too_large_for_chat`). Found with a local model that skipped the
+  skill and tried to attach a result's original path. The skill description now
+  mentions videos and recordings, and sending, so models pick it for those requests.
+
 ## [0.3.1] - 2026-11-27
 
 - Files over the chat limit are no longer uploaded without asking. `prepare_file`

@@ -2,6 +2,7 @@
 Drive files saved onto the computer."""
 
 import asyncio
+import hashlib
 import json
 import os
 import stat
@@ -54,7 +55,8 @@ def add_local_video(db, path, size):
     db.ensure_vector_table("fake-embed", 128)
     db.replace_file(
         path=str(path), name=path.name, kind="video", size=st.st_size, mtime=st.st_mtime,
-        sha256="0" * 64, captioned=True, status="ok", error=None, details="duration: 1:00",
+        sha256=hashlib.sha256(str(path).encode()).hexdigest(), captioned=True, status="ok",
+        error=None, details="duration: 1:00",
         indexed_at=0.0, chunks=[(None, "caption", "a birthday party")], vectors=[[1.0] * 128],
     )  # fmt: skip
 
@@ -211,3 +213,14 @@ def test_save_to_computer_is_offered_only_with_drive_and_needs_no_approval(
     assert notes.destructive_hint is False and notes.open_world_hint is False
     plain = build_server(cfg, db, embedder)
     assert "save_to_computer" not in {t.name for t in asyncio.run(plain.list_tools())}
+
+
+def test_search_results_say_how_to_send_and_flag_big_files(setup, home):
+    """Found with a local model that skipped the skill and attached a result's path."""
+    _, db, server, _ = setup
+    add_local_video(db, home / "party.mp4", 3 * 1024 * 1024)
+    add_local_video(db, home / "clip.mp4", 100_000)
+    out = call(server, "search_files", {"query": "birthday party"})
+    assert "call prepare_file" in out["how_to_send"]
+    flags = {r["name"]: r.get("too_large_for_chat", False) for r in out["results"]}
+    assert flags == {"party.mp4": True, "clip.mp4": False}

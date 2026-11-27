@@ -299,7 +299,8 @@ def build_server(
         the file that matched and why it matched (text, ocr, caption, speech or metadata).
         Identical copies of a file are one result; `other_copies` lists where else it is.
         Files from Google Drive have `source: "drive"`, their Drive folder in `location`
-        and a `link` that only the user can open.
+        and a `link` that only the user can open. To send a result, call prepare_file:
+        the paths returned here cannot be attached directly.
         """
         with lock:
             try:
@@ -315,9 +316,24 @@ def build_server(
             except ValueError as exc:
                 raise ToolError(str(exc)) from None
             warning = searcher.last_warning
-        result: dict = {"results": [h.to_dict() for h in hits]}
+        results = []
+        for h in hits:
+            item = h.to_dict()
+            if (h.size_bytes or 0) > send_limit:
+                item["too_large_for_chat"] = True
+            results.append(item)
+        result: dict = {"results": results}
         if not hits:
             result["note"] = "No matches. Try other words, or check index_status."
+        else:
+            # Repeated here because agents act on tool results even when they skip
+            # skills and server instructions: attaching these paths cannot work.
+            result["how_to_send"] = (
+                "These paths cannot be attached as they are. To send a file, call "
+                "prepare_file with its path and attach the path prepare_file returns. "
+                "Files marked too_large_for_chat are sent as a Google Drive link instead "
+                "(prepare_file explains)."
+            )
         if warning:
             result["warning"] = warning
         return result

@@ -1,6 +1,6 @@
 ---
 name: filesonar
-description: Find the user's own files (documents, PDFs, slides, spreadsheets, e-books, scans, screenshots, photos) on their computer or in their Google Drive by what they contain or show, not just by file name. Use whenever the user asks to find, locate, send or dig up a file, document, receipt, photo or anything they saved.
+description: Find and send the user's own files from their computer or Google Drive, searched by what they contain, show or say, not just by name: documents, PDFs, slides, spreadsheets, e-books, scans, screenshots, photos, videos, voice notes and other recordings. Use whenever the user asks to find, send, share, show, download or dig up any file, video, photo, recording, receipt or anything they saved.
 homepage: https://github.com/yacbln/filesonar
 metadata:
   openclaw:

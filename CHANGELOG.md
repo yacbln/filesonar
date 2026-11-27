@@ -6,6 +6,8 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-27
+
 - New formats: PowerPoint and LibreOffice Impress slides (`.pptx`, `.odp`; results point
   to the slide, speaker notes included), Excel and LibreOffice Calc sheets (`.xlsx`,
   `.ods`), LibreOffice Writer (`.odt`) and e-books (`.epub`, chapters in reading

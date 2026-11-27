@@ -233,6 +233,7 @@ def cmd_drive(cfg: Config, args: argparse.Namespace) -> int:
         DriveClient,
         DriveError,
         NotSignedIn,
+        load_token,
         login,
         read_client_secret,
         save_token,
@@ -241,7 +242,21 @@ def cmd_drive(cfg: Config, args: argparse.Namespace) -> int:
 
     path = token_path(cfg.data_dir)
     if args.drive_command == "login":
-        client_id, client_secret = read_client_secret(args.client_secret)
+        if args.client_secret is not None:
+            client_id, client_secret = read_client_secret(args.client_secret)
+        else:
+            # Signing in again (a revoked or expired sign-in, a new scope): reuse the
+            # OAuth client saved with the last sign-in instead of asking for the file.
+            try:
+                saved = load_token(path)
+            except NotSignedIn:
+                print(
+                    "error: first sign-in needs --client-secret, the client_secret_*.json "
+                    "downloaded from Google Cloud Console",
+                    file=sys.stderr,
+                )
+                return 2
+            client_id, client_secret = saved.client_id, saved.client_secret
         token = login(client_id, client_secret, open_browser=not args.no_browser)
         client = DriveClient(token)
         try:
@@ -369,8 +384,8 @@ def build_parser() -> argparse.ArgumentParser:
     d.add_argument(
         "--client-secret",
         type=Path,
-        required=True,
-        help="the client_secret_*.json downloaded from Google Cloud Console",
+        help="the client_secret_*.json downloaded from Google Cloud Console (needed the "
+        "first time; signing in again reuses the saved client)",
     )
     d.add_argument("--no-browser", action="store_true", help="only print the sign-in link")
     d = drive.add_parser("sync", help="fetch changes from Drive now")

@@ -633,6 +633,27 @@ def test_cli_drive_sync_status_logout(drive_cli, fake, tmp_path, capsys):
     assert not (tmp_path / "data" / "drive-token.json").exists()
 
 
+def test_cli_login_again_reuses_the_saved_client(drive_cli, tmp_path, monkeypatch, capsys):
+    """Signing in again should not need the client_secret file, which people delete."""
+    from filesonar import drive as drive_mod
+
+    seen = []
+
+    def fake_login(client_id, client_secret, **kw):
+        seen.append((client_id, client_secret))
+        return Token(client_id, client_secret, "refresh-2")
+
+    monkeypatch.setattr(drive_mod, "login", fake_login)
+    monkeypatch.setattr(DriveClient, "account", lambda self: "me@x")
+    path = tmp_path / "data" / "drive-token.json"
+    assert drive_cli("drive", "login") == 2  # nothing saved yet: the file is required
+    assert "--client-secret" in capsys.readouterr().err
+    save_token(path, Token("cid", "csecret", "refresh-1", "me@x"))
+    assert drive_cli("drive", "login", "--no-browser") == 0
+    assert seen == [("cid", "csecret")]
+    assert load_token(path).refresh_token == "refresh-2"
+
+
 def test_cli_index_includes_drive(drive_cli, fake, home, capsys):
     fake.add("a.txt", b"alpha drive file")
     write(home / "b.txt", "bravo local file")

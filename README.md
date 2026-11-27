@@ -149,7 +149,7 @@ filesonar does not ship a shared Google app; you create your own, so your access
    filesonar drive login --client-secret ~/Downloads/client_secret_XXXX.json
    ```
 
-   Your browser opens Google's consent page. Because the app is yours and unverified, Google shows *"Google hasn't verified this app"*: choose **Advanced → Go to filesonar**. Allow both permissions (read your Drive, and create files filesonar makes). Then set `enabled = true` under `[drive]` in your config and run `filesonar index`. You can delete the downloaded JSON afterwards; filesonar keeps what it needs in its own private file.
+   Your browser opens Google's consent page. Because the app is yours and unverified, Google shows *"Google hasn't verified this app"*: choose **Advanced → Go to filesonar**. Allow both permissions (read your Drive, and create files filesonar makes). Then set `enabled = true` under `[drive]` in your config and run `filesonar index`. You can delete the downloaded JSON afterwards; filesonar keeps what it needs in its own private file, and to sign in again later (for example after publishing the app) plain `filesonar drive login` is enough.
 
 The sign-in is saved to `~/.local/share/filesonar/drive-token.json` (permissions `0600`). `filesonar drive logout` revokes it and removes Drive files from the index.
 

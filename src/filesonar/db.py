@@ -272,6 +272,30 @@ class Database:
             self.delete_file(conn, row["id"])
         return True
 
+    def upgrade_readers(self, version: int, changed: dict[int, tuple[str, ...]]) -> int:
+        """When the way some file types are read improves, read those files again.
+
+        ``changed`` maps a reader version to the file name endings it changed. Their
+        records are made to look modified (local and Drive alike), so the next pass
+        reads them as if they were new. Returns how many files were marked."""
+        stored = self.get_meta("reader_version")
+        if stored is not None and int(stored) >= version:
+            return 0
+        marked = 0
+        if stored is not None or self.conn.execute("SELECT 1 FROM files LIMIT 1").fetchone():
+            since = int(stored) if stored is not None else 1
+            endings = {e for v, exts in changed.items() if v > since for e in exts}
+            with self.transaction() as conn:
+                for ending in sorted(endings):
+                    cur = conn.execute(
+                        "UPDATE files SET sha256 = '', mtime = 0, md5 = NULL "
+                        "WHERE lower(name) LIKE ? ESCAPE '\\'",
+                        ("%" + ending.replace("_", "\\_").replace("%", "\\%"),),
+                    )
+                    marked += cur.rowcount
+        self.set_meta("reader_version", str(version))
+        return marked
+
     def touch_file(self, file_id: int, path: str, name: str, mtime: float) -> None:
         """Record a move or a metadata-only change without re-reading the file."""
         with self.conn:

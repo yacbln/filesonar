@@ -1,6 +1,6 @@
 ---
 name: filesonar
-description: Find the user's own files (documents, PDFs, scans, screenshots, photos) on their computer or in their Google Drive by what they contain or show, not just by file name. Use whenever the user asks to find, locate, send or dig up a file, document, receipt, photo or anything they saved.
+description: Find the user's own files (documents, PDFs, slides, spreadsheets, e-books, scans, screenshots, photos) on their computer or in their Google Drive by what they contain or show, not just by file name. Use whenever the user asks to find, locate, send or dig up a file, document, receipt, photo or anything they saved.
 homepage: https://github.com/yacbln/filesonar
 metadata:
   openclaw:
@@ -44,7 +44,8 @@ names say nothing about their content (`IMG_2041.jpg`, `scan0003.pdf`).
 ## How to use it
 
 1. Call `search_files` with the user's description in plain words. Add filters only when
-   the user gave them: `kind` (`pdf`, `document`, `image`, `text`), `folder`,
+   the user gave them: `kind` (`pdf`, `document`, `image`, `text`; `document` covers
+   Word files, slides, spreadsheets and e-books), `folder`,
    `modified_after` / `modified_before` (`YYYY-MM-DD`).
    Use `source: "drive"` or `"local"` only if the user says where the file is.
 2. Show the top 3 results: file name, folder, date, and in a few words why it matched

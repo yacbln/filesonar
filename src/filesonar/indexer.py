@@ -30,6 +30,11 @@ from .pathrules import is_hidden, within
 
 log = logging.getLogger(__name__)
 
+# Bumped when the way some file types are read improves; files of those types already
+# in the index are then read again, once. Version 2: HTML without markup and scripts.
+READER_VERSION = 2
+READER_CHANGES = {2: (".html", ".htm", ".xhtml")}
+
 _HASH_BLOCK = 1 << 20
 
 
@@ -384,6 +389,9 @@ class Indexer:
 
     def run(self) -> IndexReport:
         """Bring the whole index up to date."""
+        marked = self.db.upgrade_readers(READER_VERSION, READER_CHANGES)
+        if marked:
+            log.info("reading %d file(s) again: filesonar now reads them better", marked)
         started = time.monotonic()
         report = IndexReport()
         seen: set[str] = set()

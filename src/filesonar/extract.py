@@ -23,8 +23,10 @@ import pytesseract
 from docx import Document
 from PIL import ExifTags, Image, ImageFile, ImageOps, UnidentifiedImageError
 
+from . import office
 from .config import IndexConfig
 from .models import Captioner, ModelError
+from .office import html_to_text
 
 log = logging.getLogger(__name__)
 
@@ -55,8 +57,13 @@ TEXT_EXTENSIONS = {
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".tif", ".tiff"}
 PDF_EXTENSIONS = {".pdf"}
 DOCX_EXTENSIONS = {".docx"}
+# ZIP-based formats read by office.py: slides, spreadsheets, OpenDocument, books.
+OFFICE_EXTENSIONS = {".pptx", ".pptm", ".xlsx", ".xlsm", ".odt", ".ods", ".odp", ".epub"}
+HTML_EXTENSIONS = {".html", ".htm", ".xhtml"}
 
-SUPPORTED_EXTENSIONS = TEXT_EXTENSIONS | IMAGE_EXTENSIONS | PDF_EXTENSIONS | DOCX_EXTENSIONS
+SUPPORTED_EXTENSIONS = (
+    TEXT_EXTENSIONS | IMAGE_EXTENSIONS | PDF_EXTENSIONS | DOCX_EXTENSIONS | OFFICE_EXTENSIONS
+)
 
 # Below this many characters of real text on a PDF page we try OCR instead.
 _MIN_PAGE_TEXT = 25
@@ -87,7 +94,7 @@ def kind_for(path: Path) -> str | None:
     ext = path.suffix.lower()
     if ext in PDF_EXTENSIONS:
         return "pdf"
-    if ext in DOCX_EXTENSIONS:
+    if ext in DOCX_EXTENSIONS or ext in OFFICE_EXTENSIONS:
         return "document"
     if ext in IMAGE_EXTENSIONS:
         return "image"
@@ -133,7 +140,53 @@ def extract_text(path: Path, data: bytes, cfg: IndexConfig) -> Extraction:
         return Extraction(kind="text")  # binary file with a text-like extension
     # utf-8-sig drops a byte-order mark (Windows editors, Google Docs exports).
     text = raw.decode("utf-8-sig", errors="replace")
+    if path.suffix.lower() in HTML_EXTENSIONS:
+        # A saved web page is mostly markup, scripts and styles: keep what a reader sees.
+        title, text = html_to_text(text)
+        details = _join_details(title=title)
+        segments = [Segment(_clean(text))]
+        if details:
+            segments.append(Segment(details, source="metadata"))
+        return Extraction(kind="text", segments=segments, details=details)
     return Extraction(kind="text", segments=[Segment(_clean(text))])
+
+
+# -- slides, spreadsheets, OpenDocument, EPUB ---------------------------------
+
+
+def extract_office(path: Path, data: bytes, cfg: IndexConfig) -> Extraction:
+    ext = path.suffix.lower()
+    arc = office.Archive(data)
+    segments: list[Segment] = []
+    if ext in (".pptx", ".pptm"):
+        title, author = office.ooxml_properties(arc)
+        slides = office.pptx_slides(arc)
+        segments = [Segment(_clean(t), page=n) for n, t in enumerate(slides, 1) if t.strip()]
+        details = _join_details(title=title, author=author, slides=str(len(slides)))
+    elif ext in (".xlsx", ".xlsm"):
+        title, author = office.ooxml_properties(arc)
+        sheets = office.xlsx_sheets(arc)
+        segments = [Segment(_clean(f"Sheet {name}\n{rows}")) for name, rows in sheets]
+        details = _join_details(title=title, author=author, sheets=str(len(sheets)))
+    elif ext == ".epub":
+        title, author, chapters = office.epub_book(arc)
+        segments = [Segment(_clean(t)) for t in chapters]
+        details = _join_details(title=title, author=author)
+    else:  # OpenDocument
+        title, author = office.odf_properties(arc)
+        parts = office.odf_parts(arc)
+        if ext == ".odp":
+            segments = [Segment(_clean(t), page=n) for n, (_, t) in enumerate(parts, 1) if t]
+            details = _join_details(title=title, author=author, slides=str(len(parts)))
+        elif ext == ".ods":
+            segments = [Segment(_clean(f"Sheet {name}\n{t}")) for name, t in parts if t]
+            details = _join_details(title=title, author=author, sheets=str(len(parts)))
+        else:
+            segments = [Segment(_clean(t)) for _, t in parts if t]
+            details = _join_details(title=title, author=author)
+    if details:
+        segments.append(Segment(details, source="metadata"))
+    return Extraction(kind="document", segments=segments, details=details)
 
 
 # -- docx ------------------------------------------------------------------
@@ -289,8 +342,16 @@ class ExtractionError(RuntimeError):
     pass
 
 
+# What tools write when there is no title or author; not worth indexing.
+_PLACEHOLDERS = {"unknown", "unknown title", "unknown author", "untitled", "none", "null", "-"}
+
+
 def _join_details(extra: str | None = None, **fields: str | None) -> str | None:
-    parts = [f"{k}: {v.strip()}" for k, v in fields.items() if v and str(v).strip()]
+    parts = [
+        f"{k}: {str(v).strip()}"
+        for k, v in fields.items()
+        if v and str(v).strip() and str(v).strip().lower() not in _PLACEHOLDERS
+    ]
     if extra:
         parts.append(extra)
     return "; ".join(parts) or None
@@ -340,12 +401,16 @@ def extract(
         if kind == "pdf":
             return extract_pdf(path, data, cfg)
         if kind == "document":
+            if path.suffix.lower() in OFFICE_EXTENSIONS:
+                return extract_office(path, data, cfg)
             return extract_docx(path, data, cfg)
         if kind == "image":
             return extract_image(path, data, cfg, captioner)
         return extract_text(path, data, cfg)
     except ExtractionError:
         raise
+    except office.OfficeError as exc:
+        raise ExtractionError(str(exc)) from exc
     except Exception as exc:
         # Third-party parsers raise many exception types on corrupt input.
         raise ExtractionError(f"{type(exc).__name__}: {exc}") from exc

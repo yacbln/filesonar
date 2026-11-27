@@ -6,6 +6,17 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+- New formats: PowerPoint and LibreOffice Impress slides (`.pptx`, `.odp`; results point
+  to the slide, speaker notes included), Excel and LibreOffice Calc sheets (`.xlsx`,
+  `.ods`), LibreOffice Writer (`.odt`) and e-books (`.epub`, chapters in reading
+  order). They are read with the standard library and `defusedxml`; an archive may not
+  unpack to more than 200 MB, and XML with entity declarations is refused.
+- Web pages (`.html`) are indexed as the text a reader sees, without markup, scripts or
+  styles. Pages indexed by an earlier version are read again once.
+- Placeholder titles and authors ("Unknown Title", "Untitled") are not indexed.
+- `scripts/eval_search.py --same-files-as INDEX` measures two indexes with exactly the
+  same queries; `--config` works (it failed with a type error).
+
 ## [0.1.1] - 2026-11-27
 
 Found by installing 0.1.0 on fresh Ubuntu 24.04 and 22.04 machines, step by step as

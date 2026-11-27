@@ -27,9 +27,13 @@ Optionally, it can also index your [Google Drive](#google-drive) — the files a
 | Files | How |
 |---|---|
 | PDF | Text per page; pages that are scans are read with OCR |
-| Word (`.docx`) | Paragraphs, tables, title and author |
+| Word (`.docx`), LibreOffice Writer (`.odt`) | Paragraphs, tables, title and author |
+| PowerPoint (`.pptx`), LibreOffice Impress (`.odp`) | Text of each slide, with speaker notes; results point to the slide |
+| Excel (`.xlsx`), LibreOffice Calc (`.ods`) | Every sheet, row by row, with the sheet name |
+| E-books (`.epub`) | Chapters in reading order, title and author |
 | Images (`.jpg`, `.png`, `.webp`, `.gif`, `.bmp`, `.tiff`) | A local vision model describes what the picture shows; OCR reads any text (receipts, screenshots, slides); date and camera from EXIF |
-| Text (`.txt`, `.md`, `.csv`, `.json`, `.html`, …) | As is |
+| Web pages (`.html`) | What a reader sees: no markup, scripts or styles |
+| Text (`.txt`, `.md`, `.csv`, `.json`, …) | As is |
 
 With [Google Drive](#google-drive) enabled, the same goes for files in your Drive, plus Google Docs, Sheets and Slides. Coming next: audio and video. See the [roadmap](#roadmap).
 
@@ -292,7 +296,8 @@ pipx uninstall filesonar
 - [x] Google Drive: index files in Drive and keep them in sync (Drive Changes API)
 - [x] `share_file`: a private Drive link to a laptop file, uploading only if it is not in Drive yet
 - [ ] Audio and video (transcripts and key frames)
-- [ ] More formats: `.odt`, `.pptx`, `.xlsx`, `.epub`
+- [x] Slides, spreadsheets, OpenDocument and e-books (`.pptx`, `.xlsx`, `.odt`, `.ods`, `.odp`, `.epub`)
+- [ ] Older Office formats (`.doc`, `.xls`, `.ppt`)
 - [ ] macOS support
 - [ ] Windows support (WSL may already work)
 

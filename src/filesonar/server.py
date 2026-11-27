@@ -157,7 +157,11 @@ def build_server(
         ],
         kind: Annotated[
             str | None,
-            Field(description=f"Only this kind of file: one of {', '.join(KINDS)}."),
+            Field(
+                description=f"Only this kind of file: one of {', '.join(KINDS)}. "
+                "'document' covers Word, slides, spreadsheets and e-books; 'text' covers "
+                "plain text, notes, CSV and web pages."
+            ),
         ] = None,
         folder: Annotated[
             str | None, Field(description="Only files inside this folder (absolute path).")

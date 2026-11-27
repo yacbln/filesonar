@@ -8,6 +8,8 @@ where search ranks that file. Run it before and after changing anything in ranki
     python scripts/eval_search.py --mode paraphrase  # the local model rewrites the
                                                      # content as a query in its own words
     python scripts/eval_search.py --rrf-k 60         # try another fusion constant
+    python scripts/eval_search.py -c after.toml --same-files-as before.sqlite3
+                                                     # same queries on two indexes
 
 Queries never use the file name. Nothing is written to the index, and nothing leaves
 your machine (paraphrases come from the Ollama model in your config).
@@ -20,6 +22,7 @@ import random
 import re
 import statistics
 import time
+from pathlib import Path
 
 import httpx
 
@@ -104,7 +107,14 @@ def main() -> None:
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--rrf-k", type=int, help="override the fusion constant")
     ap.add_argument("--show-misses", action="store_true")
-    ap.add_argument("-c", "--config", default=None)
+    ap.add_argument("-c", "--config", type=Path, default=None)
+    ap.add_argument(
+        "--same-files-as",
+        type=Path,
+        metavar="INDEX",
+        help="only sample files also in this other index file, so two indexes (before "
+        "and after a change) are measured with exactly the same queries",
+    )
     args = ap.parse_args()
 
     random.seed(args.seed)
@@ -123,8 +133,15 @@ def main() -> None:
     rows = db.conn.execute(
         "SELECT id, path, name, origin, COALESCE(md5, sha256) AS key FROM files f "
         "WHERE status = 'ok' AND EXISTS (SELECT 1 FROM chunks c WHERE c.file_id = f.id "
-        "AND c.source != 'metadata')"
+        "AND c.source != 'metadata') ORDER BY path"
     ).fetchall()
+    if args.same_files_as:
+        import sqlite3
+
+        other = sqlite3.connect(f"file:{args.same_files_as}?mode=ro", uri=True)
+        keep = {r[0] for r in other.execute("SELECT path FROM files WHERE status = 'ok'")}
+        other.close()
+        rows = [r for r in rows if r["path"] in keep]
     ranks: dict[str, list[int | None]] = {}
     times: list[float] = []
     for row in random.sample(rows, min(args.n, len(rows))):

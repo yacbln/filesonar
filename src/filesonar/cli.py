@@ -82,6 +82,15 @@ def cmd_doctor(cfg: Config) -> int:
         state = "ok" if present else f"(missing: ollama pull {name})"
         print(f"{label + ':':<12} {name} {state}")
         ok = ok and (present or label == "vision")
+    for name, (vram, size) in sorted(client.loaded_models().items()):
+        if name.endswith(":latest") or not size or vram >= size:
+            continue
+        # Ollama splits a model between GPU and CPU when video memory was short at load
+        # time; it stays that way (and runs several times slower) until reloaded.
+        print(
+            f"warning:     {name} is only {vram * 100 // size}% in GPU memory and will be "
+            f"slow; free GPU memory, then run: ollama stop {name}"
+        )
     print(f"tesseract:   {'ok' if tesseract_available() else 'missing (no OCR)'}")
     if cfg.drive.enabled:
         from .drive import DriveError, load_token, token_path

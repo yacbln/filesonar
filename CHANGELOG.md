@@ -6,6 +6,9 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+- `filesonar doctor` warns when Ollama has a model only partly in GPU memory, which
+  makes photo descriptions several times slower.
+
 ## [0.1.0] - 2026-11-27
 
 First release.

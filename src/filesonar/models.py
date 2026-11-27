@@ -89,6 +89,20 @@ class OllamaClient:
         # "nomic-embed-text" and "nomic-embed-text:latest" refer to the same model.
         return names | {n.removesuffix(":latest") for n in names}
 
+    def loaded_models(self) -> dict[str, tuple[int, int]]:
+        """Models Ollama has in memory: name -> (bytes in GPU memory, total bytes)."""
+        try:
+            resp = self.http.get("/api/ps")
+            resp.raise_for_status()
+            out = {}
+            for m in resp.json().get("models", []):
+                size, vram = int(m.get("size") or 0), int(m.get("size_vram") or 0)
+                out[m["name"]] = (vram, size)
+                out[m["name"].removesuffix(":latest")] = (vram, size)
+            return out
+        except (httpx.HTTPError, ValueError, KeyError, TypeError):
+            return {}
+
 
 class OllamaEmbedder:
     def __init__(self, client: OllamaClient, batch_size: int = 32):

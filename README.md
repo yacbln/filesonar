@@ -266,6 +266,7 @@ Images that could not be captioned are retried automatically the next time the v
 
 - **`filesonar doctor`** shows what is missing.
 - **"meaning-based search unavailable"** — Ollama is not running or the embedding model is not pulled.
+- **Photos suddenly take 10+ seconds each** — Ollama loaded the vision model while video memory was short and split it between GPU and CPU; it stays split until reloaded. `filesonar doctor` warns about this. Free some GPU memory and run `ollama stop qwen2.5vl:7b`; the next photo loads it fully onto the GPU.
 - **A file is not found** — check that its folder is in `roots`, that it is not excluded or hidden, and `filesonar status` for errors. `filesonar -v index` prints every file it reads.
 
 ## Roadmap

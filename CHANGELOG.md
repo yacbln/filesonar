@@ -6,6 +6,18 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+Found by installing 0.1.0 on fresh Ubuntu 24.04 and 22.04 machines, step by step as
+the README says:
+
+- Scans and photos indexed before Tesseract was installed are read again once it is
+  (they were never retried, because the files had not changed). The index records
+  whether OCR was available for each file; upgrading marks the scans that had no text.
+- Python 3.10 is supported, so the stock `pipx` on Ubuntu 22.04 installs filesonar
+  (it failed with "No matching distribution found").
+- The README says how to get `pipx` and Ollama on a fresh system.
+- `filesonar setup` shows model download progress that only goes up (it restarted at
+  0% for each part of the model).
+
 ## [0.1.0] - 2026-11-27
 
 First release.

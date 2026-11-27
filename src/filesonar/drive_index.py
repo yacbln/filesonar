@@ -235,7 +235,7 @@ class DriveIndexer:
         link = file.get("webViewLink")
         row = self.db.get_file(key)
 
-        if row is not None and not self.local._needs_caption(row):
+        if row is not None and not self.local._needs_reread(row):
             same = row["md5"] == md5 if md5 else row["mtime"] == mtime
             if same and row["status"] != "error":
                 if (row["name"], row["location"], row["link"], row["mtime"]) != (
@@ -267,6 +267,7 @@ class DriveIndexer:
             return
 
         started = time.monotonic()
+        ocr = self.local._ocr_now()
         try:
             data, extraction = self._fetch_and_extract(file, kind)
         except DriveError as exc:
@@ -295,6 +296,7 @@ class DriveIndexer:
             indexed_at=time.time(),
             chunks=chunks,
             vectors=vectors,
+            ocr=ocr,
         )
         self.progress(f"indexed {location}/{name} ({time.monotonic() - started:.1f}s)")
         if status == "error":
@@ -309,7 +311,7 @@ class DriveIndexer:
             (
                 r
                 for r in self.db.find_by_md5(md5)
-                if r["path"] != key and r["status"] != "error" and not self.local._needs_caption(r)
+                if r["path"] != key and r["status"] != "error" and not self.local._needs_reread(r)
             ),
             None,
         )
@@ -329,6 +331,7 @@ class DriveIndexer:
             indexed_at=time.time(),
             chunks=chunks,
             vectors=vectors,
+            ocr=bool(twin["ocr"]),
         )
         self.progress(f"copied  {meta['location']}/{meta['name']} (same as {twin['path']})")
         if row is None:

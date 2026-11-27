@@ -205,3 +205,29 @@ def test_tests_never_reach_the_real_ollama():
     """The suite must not depend on (or disturb) an Ollama running on this machine."""
     assert OllamaClient(ModelConfig()).version() is None
     assert OllamaClient(ModelConfig()).loaded_models() == {}
+
+
+def test_pull_adds_up_the_parts_of_a_model():
+    """Found on a fresh install: progress went 90% -> 0% when Ollama began the next part."""
+    events = [
+        {"status": "pulling manifest"},
+        {"status": "pulling a", "digest": "a", "total": 900, "completed": 0},
+        {"status": "pulling a", "digest": "a", "total": 900, "completed": 900},
+        {"status": "pulling b", "digest": "b", "total": 100, "completed": 0},
+        {"status": "pulling b", "digest": "b", "total": 100, "completed": 100},
+        {"status": "success"},
+    ]
+    body = "\n".join(json.dumps(e) for e in events)
+    client = client_with(lambda r: httpx.Response(200, text=body))
+    seen = []
+    client.pull("nomic-embed-text", lambda done, total: seen.append((done, total)))
+    assert seen == [(0, 900), (900, 900), (900, 1000), (1000, 1000)]
+
+
+def test_pull_reports_errors():
+    body = json.dumps({"error": "pull model manifest: file does not exist"})
+    client = client_with(lambda r: httpx.Response(200, text=body))
+    with pytest.raises(ModelError, match="does not exist"):
+        client.pull("no-such-model")
+    with pytest.raises(ModelError, match="HTTP 500"):
+        client_with(lambda r: httpx.Response(500)).pull("x")

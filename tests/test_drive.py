@@ -9,7 +9,7 @@ from pathlib import Path
 
 import httpx
 import pytest
-from conftest import write
+from conftest import needs_tesseract, write
 from fakedrive import FakeDrive
 from mcp.server.mcpserver.exceptions import ToolError
 from samples import photo, text_pdf
@@ -178,6 +178,27 @@ def test_photo_without_preview_is_downloaded(fake, dindexer, ddb, tmp_path):
     dindexer.sync()
     assert fake.downloads == [f.id]
     assert ddb.conn.execute("SELECT status FROM files").fetchone()[0] == "ok"
+
+
+@needs_tesseract
+def test_drive_scans_are_read_again_once_ocr_is_installed(
+    fake, dindexer, ddb, tmp_path, monkeypatch
+):
+    from samples import text_image
+
+    from filesonar import extract as extract_module
+
+    lines = ["INVOICE 4471", "BLUE HERON PLUMBING"]
+    scan = text_image(tmp_path / "src" / "invoice.png", lines).read_bytes()
+    f = fake.add("invoice.png", scan)
+    monkeypatch.setattr(extract_module, "tesseract_available", lambda: False)
+    dindexer.sync()
+    assert ddb.conn.execute("SELECT ocr FROM files").fetchone()[0] == 0
+    monkeypatch.setattr(extract_module, "tesseract_available", lambda: True)
+    report = dindexer.sync(full=True)  # the daily full scan revisits every file
+    assert report.updated == 1 and fake.downloads.count(f.id) == 2
+    assert ddb.conn.execute("SELECT ocr FROM files").fetchone()[0] == 1
+    assert "4471" in " ".join(r[0] for r in ddb.conn.execute("SELECT text FROM chunks"))
 
 
 def test_file_already_on_this_computer_is_not_downloaded(
@@ -576,7 +597,8 @@ def test_v1_index_is_upgraded_in_place(tmp_path):
     db = Database(path)
     row = db.get_file("/x/a.txt")
     assert row["origin"] == "local" and row["md5"] is None
-    assert db.get_meta("schema_version") == "2"
+    assert db.get_meta("schema_version") == "3"
+    assert row["ocr"] == 1  # older rows are not re-read just because of the upgrade
     db.close()
     Database(path).close()  # opening again is a no-op
 

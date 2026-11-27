@@ -2,13 +2,12 @@
 
 import stat
 import subprocess
-import tomllib
 from pathlib import Path
 
 import pytest
 
 from filesonar import wizard
-from filesonar.config import load_config, render_config, set_toml_value
+from filesonar.config import load_config, render_config, set_toml_value, tomllib
 from filesonar.drive import Token, save_token, token_path
 from filesonar.wizard import Options, Prompter, Setup
 
@@ -33,8 +32,8 @@ class FakeOllama:
     def pull(self, name, progress=None):
         self.pulled.append(name)
         if progress:
-            progress("pulling", 50, 100)
-            progress("success", 100, 100)
+            progress(50, 100)
+            progress(100, 100)
         self.installed.add(name)
 
 

@@ -215,7 +215,7 @@ class Setup:
             gpu = self._has_gpu()
             print(
                 f"  The vision model {cfg.vision_model} lets you search photos by what they "
-                f"show.\n  It is a {VISION_DOWNLOAD} download"
+                f"show.\n  It downloads {VISION_DOWNLOAD}"
                 + (" and works best with a GPU." if gpu else "; no GPU found, so it would be slow.")
             )
             wants = self.ask.yes("Download it?", default=gpu)
@@ -231,12 +231,11 @@ class Setup:
         print(f"  downloading {name} ({size}) ...")
         last = [-1]
 
-        def show(status: str, done: int, total: int) -> None:
-            if total:
-                percent = done * 100 // total
-                if percent != last[0] and percent % 10 == 0:
-                    last[0] = percent
-                    print(f"    {percent}%", flush=True)
+        def show(done: int, total: int) -> None:
+            percent = done * 100 // total // 10 * 10
+            if percent > last[0]:  # every 10%, never backwards
+                last[0] = percent
+                print(f"    {percent}%", flush=True)
 
         try:
             client.pull(name, show)

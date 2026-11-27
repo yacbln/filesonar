@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 
+from . import extract as extract_module
 from .chunking import chunk_text
 from .config import Config
 from .db import Database
@@ -167,6 +168,21 @@ class Indexer:
 
     # -- indexing --------------------------------------------------------
 
+    def _ocr_now(self) -> bool:
+        return self.cfg.index.ocr and extract_module.tesseract_available()
+
+    def _needs_ocr(self, row) -> bool:
+        """Read while OCR was missing (Tesseract installed later, or OCR turned on)."""
+        return (
+            row is not None
+            and row["kind"] in ("image", "pdf")
+            and not row["ocr"]
+            and self._ocr_now()
+        )
+
+    def _needs_reread(self, row) -> bool:
+        return self._needs_caption(row) or self._needs_ocr(row)
+
     def _needs_caption(self, row) -> bool:
         return (
             row is not None
@@ -194,7 +210,7 @@ class Indexer:
             "AND status != 'error' ORDER BY captioned DESC, origin = 'local' DESC LIMIT 1",
             (sha, md5, key),
         ).fetchone()
-        if twin is None or self._needs_caption(twin) or not self._vector_ready_for_model():
+        if twin is None or self._needs_reread(twin) or not self._vector_ready_for_model():
             return False
         chunks, vectors = self.db.stored_chunks(twin["id"])
         if not chunks:
@@ -214,6 +230,7 @@ class Indexer:
             chunks=chunks,
             vectors=vectors,
             md5=md5,
+            ocr=bool(twin["ocr"]),
         )
         self.progress(f"copied  {key} (same content as {twin['path']})")
         if row is None:
@@ -270,7 +287,7 @@ class Indexer:
             row is not None
             and row["size"] == st.st_size
             and row["mtime"] == st.st_mtime
-            and not self._needs_caption(row)
+            and not self._needs_reread(row)
             and row["md5"] is not None
         ):
             report.unchanged += 1
@@ -294,7 +311,7 @@ class Indexer:
         # in both places.
         md5 = hashlib.md5(data, usedforsecurity=False).hexdigest()
 
-        if row is not None and row["sha256"] == sha and not self._needs_caption(row):
+        if row is not None and row["sha256"] == sha and not self._needs_reread(row):
             self.db.touch_file(row["id"], key, path.name, st.st_mtime)
             if row["md5"] != md5:
                 self.db.set_md5(row["id"], md5)
@@ -303,9 +320,7 @@ class Indexer:
 
         if row is None:
             moved = self._find_moved(sha, key)
-            if moved is not None and not (
-                moved["kind"] == "image" and not moved["captioned"] and self._needs_caption(moved)
-            ):
+            if moved is not None and not self._needs_reread(moved):
                 self.db.touch_file(moved["id"], key, path.name, st.st_mtime)
                 if moved["md5"] != md5:
                     self.db.set_md5(moved["id"], md5)
@@ -317,6 +332,7 @@ class Indexer:
         if self._copy_from_twin(path, key, sha, md5, st, row, report):
             return
         status, error = "ok", None
+        ocr = self._ocr_now()
         try:
             extraction = extract(path, self.cfg.index, self.captioner, data=data)
         except ExtractionError as exc:
@@ -348,6 +364,7 @@ class Indexer:
             chunks=chunks,
             vectors=vectors,
             md5=md5,
+            ocr=ocr,
         )
         self.progress(f"indexed {key} ({time.monotonic() - started:.1f}s)")
         if status != "error":

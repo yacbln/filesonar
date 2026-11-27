@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import re
 from dataclasses import asdict, dataclass, field
-from datetime import UTC, date, datetime
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 from .config import SearchConfig
 from .db import Database
 from .models import Embedder, ModelError
+
+UTC = timezone.utc  # datetime.UTC needs Python 3.11
 
 # Reciprocal rank fusion constant. The textbook value is 60; measured on a real
 # 16,000-file index (local + Google Drive), 5 lets a strong keyword match on rare

@@ -2,7 +2,7 @@ import os
 import stat
 
 import pytest
-from conftest import FakeCaptioner, FakeEmbedder, write
+from conftest import FakeCaptioner, FakeEmbedder, needs_tesseract, write
 from samples import photo
 
 from filesonar.db import Database
@@ -369,3 +369,93 @@ def test_office_lock_files_are_skipped(home, cfg, db, embedder):
     write(home / "price$5 x~$y.txt", "a real file with odd characters")
     Indexer(cfg, db, embedder).run()
     assert [p.rsplit("/", 1)[-1] for p in db.all_paths()] == ["price$5 x~$y.txt"]
+
+
+# -- OCR that becomes available later ------------------------------------------
+# Found on a fresh install: setup suggests installing Tesseract, but scans indexed
+# before that were never read again, because their files had not changed.
+
+
+def _set_ocr(monkeypatch, available: bool) -> None:
+    from filesonar import extract as extract_module
+
+    monkeypatch.setattr(extract_module, "tesseract_available", lambda: available)
+
+
+@needs_tesseract
+def test_scans_are_read_again_once_ocr_is_installed(home, indexer, db, monkeypatch):
+    from samples import scanned_pdf, text_image
+
+    text_image(home / "invoice.png", ["INVOICE 4471", "BLUE HERON PLUMBING"])
+    scanned_pdf(home / "invoice.pdf", text_image(home / ".x/p.png", ["RECEIPT 9921"]))
+    write(home / "notes.txt", "plain text needs no OCR")
+
+    _set_ocr(monkeypatch, False)
+    assert indexer.run().added == 3
+    assert {r["name"]: r["ocr"] for r in db.conn.execute("SELECT name, ocr FROM files")} == {
+        "invoice.png": 0,
+        "invoice.pdf": 0,
+        "notes.txt": 0,  # nothing to re-read for text files, whatever this says
+    }
+    assert indexer.run().unchanged == 3  # still no OCR: nothing to do
+
+    _set_ocr(monkeypatch, True)
+    report = indexer.run()
+    assert (report.updated, report.unchanged) == (2, 1)  # the scans, not the text file
+    text = " ".join(r["text"] for r in db.conn.execute("SELECT text FROM chunks"))
+    assert "4471" in text and "9921" in text
+    assert indexer.run().unchanged == 3  # read once, then settled
+
+
+def test_ocr_turned_off_in_the_config_never_rereads(home, make_cfg, db, embedder, monkeypatch):
+    from samples import text_image
+
+    text_image(home / "invoice.png", ["INVOICE 4471"])
+    _set_ocr(monkeypatch, True)
+    off = Indexer(make_cfg(index={"ocr": False}), db, embedder, FakeCaptioner())
+    assert off.run().added == 1
+    assert off.run().unchanged == 1
+
+
+def test_identical_copy_of_an_unread_scan_is_not_copied(home, indexer, db, monkeypatch):
+    """A twin indexed without OCR must not hand its empty result to a new copy."""
+    from samples import text_image
+
+    text_image(home / "a/invoice.png", ["INVOICE 4471"])
+    _set_ocr(monkeypatch, False)
+    indexer.run()
+    (home / "b").mkdir()
+    (home / "b/invoice.png").write_bytes((home / "a/invoice.png").read_bytes())
+    _set_ocr(monkeypatch, True)
+    indexer.run()
+    rows = db.conn.execute("SELECT path, ocr FROM files ORDER BY path").fetchall()
+    assert [r["ocr"] for r in rows] == [1, 1]
+
+
+def test_upgrade_marks_only_textless_scans_for_ocr(tmp_path):
+    """A 0.1.0 index has no OCR flag. Scans and photos that gave no text at all get
+    another try once OCR is available; everything else stays as it is."""
+    path = tmp_path / "index.sqlite3"
+    db = Database(path)
+    rows = [
+        ("scan.png", "image", "empty"),
+        ("scan.pdf", "pdf", "empty"),
+        ("photo.jpg", "image", "ok"),  # has a description already
+        ("notes.txt", "text", "empty"),  # OCR cannot help a text file
+    ]
+    for n, (name, kind, status) in enumerate(rows):
+        db.conn.execute(
+            "INSERT INTO files(path, name, kind, size, mtime, sha256, status, indexed_at) "
+            "VALUES (?, ?, ?, 1, 1.0, ?, ?, 1.0)",
+            (f"/x/{name}", name, kind, f"sha{n}", status),
+        )
+    db.conn.execute("ALTER TABLE files DROP COLUMN ocr")
+    db.set_meta("schema_version", "2")
+    db.conn.commit()
+    db.close()
+
+    db = Database(path)
+    flags = dict(db.conn.execute("SELECT name, ocr FROM files"))
+    assert flags == {"scan.png": 0, "scan.pdf": 0, "photo.jpg": 1, "notes.txt": 1}
+    assert db.get_meta("schema_version") == "3"
+    db.close()

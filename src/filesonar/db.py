@@ -11,7 +11,7 @@ from pathlib import Path
 
 import sqlite_vec
 
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS meta (
@@ -36,7 +36,8 @@ CREATE TABLE IF NOT EXISTS files (
     remote_id   TEXT,                    -- Drive file id
     link        TEXT,                    -- Drive web link (private to the owner)
     location    TEXT,                    -- Drive folder, e.g. "My Drive/Taxes"
-    md5         TEXT                     -- what Drive reports; compared with local files
+    md5         TEXT,                    -- what Drive reports; compared with local files
+    ocr         INTEGER NOT NULL DEFAULT 1  -- 0: a scan or photo read while OCR was missing
 );
 CREATE INDEX IF NOT EXISTS files_sha ON files(sha256);
 CREATE INDEX IF NOT EXISTS files_kind ON files(kind);
@@ -66,6 +67,10 @@ _V2_COLUMNS = (
     ("location", "TEXT"),
     ("md5", "TEXT"),
 )
+# Version 3: remember files read without OCR, to read them again once Tesseract is
+# installed. On upgrade, only scans and photos that yielded no text at all are marked:
+# OCR is all they can gain, and there are few of them.
+_V3_COLUMNS = (("ocr", "INTEGER NOT NULL DEFAULT 1"),)
 _V2_INDEXES = """
 CREATE INDEX IF NOT EXISTS files_md5 ON files(md5);
 CREATE INDEX IF NOT EXISTS files_origin ON files(origin);
@@ -89,6 +94,7 @@ FILE_COLUMNS = (
     "link",
     "location",
     "md5",
+    "ocr",
 )
 
 
@@ -123,8 +129,15 @@ class Database:
                 os.chmod(side, 0o600)
         current = self.get_meta("schema_version")
         if current == "1":
-            self._migrate_to_v2()
+            self._add_columns(_V2_COLUMNS, 2)
             current = "2"
+        if current == "2":
+            self._add_columns(_V3_COLUMNS, 3)
+            with self.conn:
+                self.conn.execute(
+                    "UPDATE files SET ocr = 0 WHERE kind IN ('image', 'pdf') AND status = 'empty'"
+                )
+            current = "3"
         self.conn.executescript(_V2_INDEXES)
         if current is None:
             self.set_meta("schema_version", str(SCHEMA_VERSION))
@@ -134,15 +147,17 @@ class Database:
                 f"{SCHEMA_VERSION}; delete it and run `filesonar index` again"
             )
 
-    def _migrate_to_v2(self) -> None:
+    def _add_columns(self, columns: tuple[tuple[str, str], ...], version: int) -> None:
         have = {r["name"] for r in self.conn.execute("PRAGMA table_info(files)")}
         with self.conn:
-            for name, decl in _V2_COLUMNS:
+            for name, decl in columns:
                 if name not in have:
+                    # Names and declarations are the constants above, never input.
                     self.conn.execute(f"ALTER TABLE files ADD COLUMN {name} {decl}")
             self.conn.execute(
-                "INSERT INTO meta(key, value) VALUES('schema_version', '2') "
-                "ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+                "INSERT INTO meta(key, value) VALUES('schema_version', ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (str(version),),
             )
 
     def close(self) -> None:
@@ -291,6 +306,7 @@ class Database:
         link: str | None = None,
         location: str | None = None,
         md5: str | None = None,
+        ocr: bool = True,
     ) -> int:
         """Atomically replace everything stored for one file."""
         if len(chunks) != len(vectors):
@@ -301,7 +317,7 @@ class Database:
                 self.delete_file(conn, existing["id"])
             values = (
                 path, name, kind, size, mtime, sha256, int(captioned), status, error,
-                details, indexed_at, origin, remote_id, link, location, md5,
+                details, indexed_at, origin, remote_id, link, location, md5, int(ocr),
             )  # fmt: skip
             # Column names come from the FILE_COLUMNS constant; values are bound.
             cur = conn.execute(

@@ -11,10 +11,15 @@ import ipaddress
 import json
 import os
 import re
-import tomllib
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlparse
+
+if sys.version_info >= (3, 11):
+    import tomllib
+else:  # Python 3.10 (Ubuntu 22.04): the same parser, as a package
+    import tomli as tomllib
 
 from .pathrules import matches_any, within
 

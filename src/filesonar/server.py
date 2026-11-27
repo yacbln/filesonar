@@ -13,7 +13,7 @@ import hashlib
 import mimetypes
 import threading
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated
 
@@ -32,6 +32,8 @@ from .indexer import Indexer
 from .models import Embedder
 from .outbox import KEEP_HOURS, OutboxError, clean, stage
 from .search import KINDS, MAX_LIMIT, SOURCES, Searcher
+
+UTC = timezone.utc  # datetime.UTC needs Python 3.11
 
 PREVIEW_CHARS = 2000
 

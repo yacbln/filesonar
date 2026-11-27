@@ -35,12 +35,21 @@ With [Google Drive](#google-drive) enabled, the same goes for files in your Driv
 
 ## Install
 
-You need Linux, Python 3.11 or newer, and [Ollama](https://ollama.com/download), which runs the models on your computer. Then:
+You need Linux with Python 3.10 or newer (Ubuntu 22.04 and later, Debian 12, Fedora, Arch, …) and [Ollama](https://ollama.com/download), which runs the models on your computer:
+
+```bash
+curl -fsSL https://ollama.com/install.sh | sh     # if you do not have Ollama yet
+sudo apt install pipx && pipx ensurepath           # if you do not have pipx yet (Fedora: dnf, Arch: pacman)
+```
+
+Open a new terminal so `pipx ensurepath` takes effect, then:
 
 ```bash
 pipx install filesonar
 filesonar setup
 ```
+
+`uv tool install filesonar` works too, if you use [uv](https://docs.astral.sh/uv/).
 
 `setup` asks a few questions and does the rest. Each step checks first and only changes what is missing, so it is safe to run again — and running it after `pipx upgrade filesonar` is how an upgrade takes effect. It:
 

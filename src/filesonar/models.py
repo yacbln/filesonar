@@ -139,8 +139,12 @@ class OllamaClient:
         except (httpx.HTTPError, ValueError, AttributeError):
             return None
 
-    def pull(self, name: str, progress: Callable[[str, int, int], None] | None = None) -> None:
-        """Download a model, reporting (status, completed bytes, total bytes)."""
+    def pull(self, name: str, progress: Callable[[int, int], None] | None = None) -> None:
+        """Download a model, reporting (bytes done, bytes in total) as it goes.
+
+        A model comes in several parts, each with its own progress; this adds them up,
+        so the reported share only grows (apart from a small step when a part starts)."""
+        parts: dict[str, tuple[int, int]] = {}
         try:
             with self.http.stream(
                 "POST", "/api/pull", json={"model": name, "stream": True}, timeout=None
@@ -153,11 +157,14 @@ class OllamaClient:
                     event = json.loads(line)
                     if event.get("error"):
                         raise ModelError(f"ollama pull {name} failed: {event['error']}")
-                    if progress is not None:
-                        progress(
-                            str(event.get("status", "")),
+                    if progress is not None and event.get("digest") and event.get("total"):
+                        parts[event["digest"]] = (
                             int(event.get("completed") or 0),
-                            int(event.get("total") or 0),
+                            int(event["total"]),
+                        )
+                        progress(
+                            sum(done for done, _ in parts.values()),
+                            sum(total for _, total in parts.values()),
                         )
         except httpx.HTTPError as exc:
             raise ModelError(f"ollama pull {name} failed: {exc}") from exc

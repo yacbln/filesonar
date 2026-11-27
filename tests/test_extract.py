@@ -253,6 +253,14 @@ def test_rgb_png_with_odd_transparency_entry(tmp_path):
     )
     p = tmp_path / "AIM.png"
     p.write_bytes(png)
+    import PIL
+
+    if int(PIL.__version__.split(".")[0]) < 13:
+        # Pillow 12 (the newest for Python 3.10) cannot open this file at all: it is
+        # reported as unreadable, like any broken image, and indexing carries on.
+        with pytest.raises(ExtractionError, match="unreadable image"):
+            extract(p, IndexConfig(ocr=False), FakeCaptioner())
+        return
     out = extract(p, IndexConfig(ocr=False), FakeCaptioner())
     assert out.captioned
 

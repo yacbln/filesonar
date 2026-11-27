@@ -380,6 +380,9 @@ def _add_drive_photo_details(extraction: Extraction, file: dict) -> None:
     camera = " ".join(str(photo[k]).strip() for k in ("cameraMake", "cameraModel") if photo.get(k))
     if camera:
         parts.append(f"camera: {camera}")
+    # Previews sometimes keep the photo's own EXIF; do not repeat what is already there.
+    have = extraction.details or ""
+    parts = [part for part in parts if part.split(":")[0] + ":" not in have]
     if not parts:
         return
     extra = "; ".join(parts)

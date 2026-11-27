@@ -139,6 +139,24 @@ def test_photos_use_drive_preview_and_drive_metadata(fake, dindexer, ddb, tmp_pa
     assert "taken: 2023-07-14" in row["details"] and "camera: Pixel 7" in row["details"]
 
 
+def test_preview_with_its_own_exif_is_not_described_twice(fake, dindexer, ddb, tmp_path):
+    """Found on a real Drive: previews can keep EXIF, which Drive also reports."""
+    from samples import photo as make_photo
+
+    preview = make_photo(
+        tmp_path / "src" / "exif.jpg", exif={306: "2026:11:26 22:22:53"}
+    )  # DateTime
+    fake.add(
+        "IMG_1.jpg",
+        b"x",
+        photo={"time": "2026:11:26 22:22:53", "cameraMake": "motorola", "cameraModel": "edge"},
+        thumbnail=preview.read_bytes(),
+    )
+    dindexer.sync()
+    details = ddb.conn.execute("SELECT details FROM files").fetchone()[0]
+    assert details.count("taken:") == 1 and "camera: motorola edge" in details
+
+
 def test_redirected_preview_falls_back_to_download(fake, dindexer, ddb, tmp_path, monkeypatch):
     f = fake.add("pic.jpg", photo_bytes(tmp_path), thumbnail=b"")
     original = fake.handle

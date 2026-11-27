@@ -6,6 +6,13 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+- Better ranking when a few rare words identify a file: the reciprocal rank fusion
+  constant goes from 60 to 5. On a real 16,000-file index, top-3 recall for such
+  queries rose from 64-76% to 86-95% (Google Drive: 48-61% to 86-100%), with no loss
+  for meaning-only queries. `scripts/eval_search.py` measures this on your own index.
+- Office lock files (`~$report.docx`, `.~lock.report.docx#`) are skipped by default.
+- Byte-order marks at the start of text files and Google Docs exports are removed.
+
 - Photo descriptions no longer echo the prompt ("not a photo, screenshot, receipt or
   diagram") or state what an image lacks ("there is no visible text or brands"); such
   sentences made unrelated images match searches for those words.

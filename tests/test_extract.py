@@ -255,3 +255,13 @@ def test_rgb_png_with_odd_transparency_entry(tmp_path):
     p.write_bytes(png)
     out = extract(p, IndexConfig(ocr=False), FakeCaptioner())
     assert out.captioned
+
+
+def test_text_byte_order_mark_is_dropped(tmp_path):
+    from filesonar.config import IndexConfig
+    from filesonar.extract import extract
+
+    path = tmp_path / "bom.txt"
+    path.write_bytes(b"\xef\xbb\xbfcompany: Tovala")
+    text = extract(path, IndexConfig()).segments[0].text
+    assert text.startswith("company")

@@ -84,6 +84,9 @@ DEFAULT_EXCLUDE = (
     "**/.cache/**",
     "**/.Trash*/**",
     "**/.local/share/Trash/**",
+    # Lock files office suites leave next to open documents (not documents themselves).
+    "**/~$*",
+    "**/.~lock.*#",
 )
 
 

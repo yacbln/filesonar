@@ -131,7 +131,8 @@ def extract_text(path: Path, data: bytes, cfg: IndexConfig) -> Extraction:
     raw = data
     if b"\x00" in raw[:8192]:
         return Extraction(kind="text")  # binary file with a text-like extension
-    text = raw.decode("utf-8", errors="replace")
+    # utf-8-sig drops a byte-order mark (Windows editors, Google Docs exports).
+    text = raw.decode("utf-8-sig", errors="replace")
     return Extraction(kind="text", segments=[Segment(_clean(text))])
 
 

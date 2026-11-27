@@ -609,3 +609,10 @@ def test_cli_index_includes_drive(drive_cli, fake, home, capsys):
     assert drive_cli("index") == 0
     out = capsys.readouterr().out
     assert "Google Drive: " in out and "1 added" in out
+
+
+def test_office_lock_files_in_drive_are_skipped(fake, dindexer, ddb):
+    fake.add("~$notated Bibliography.docx", b"owner file")
+    fake.add("bibliography.txt", b"annotated bibliography")
+    dindexer.sync()
+    assert [r["name"] for r in ddb.conn.execute("SELECT name FROM files")] == ["bibliography.txt"]

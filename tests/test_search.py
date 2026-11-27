@@ -207,3 +207,21 @@ def test_identical_copies_are_one_result(home, indexer, searcher):
     assert len([h for h in hits if "book" in h.name]) == 1
     assert len(hits[0].other_copies) == 2
     assert hits[0].path not in hits[0].other_copies
+
+
+def test_clear_keyword_winner_beats_middling_matches():
+    """Measured on a real index: with the textbook constant (60), a file ranked first by
+    keywords lost to files that were only around 10th in both keyword and meaning
+    results. The constant in use must let the clear winner through."""
+    from filesonar.search import fuse
+
+    middling = list(range(100, 110))
+    keyword = [1, *middling]  # 1 is the clear keyword winner
+    meaning = [200, *middling]  # 1 is not close in meaning
+    scores = fuse([(keyword, 1.0), (meaning, 1.0)])
+    # Strong in both lists still wins (two signals beat one) ...
+    assert scores[100] > scores[1]
+    # ... but files only 6th-10th in both no longer beat the clear keyword winner.
+    assert all(scores[1] > scores[m] for m in middling[5:])
+    old = fuse([(keyword, 1.0), (meaning, 1.0)], k=60)
+    assert all(old[1] < old[m] for m in middling[5:])  # the behaviour this guards against

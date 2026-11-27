@@ -361,3 +361,11 @@ def test_identical_copy_reuses_the_existing_entry(home, indexer, db, embedder, c
     (home / "Downloads/beach.jpg").unlink()
     indexer.run()
     assert db.fts_search('"bicycle"', 5)
+
+
+def test_office_lock_files_are_skipped(home, cfg, db, embedder):
+    write(home / "~$report.docx", "owner file")
+    write(home / ".~lock.report.docx#", "lock")
+    write(home / "price$5 x~$y.txt", "a real file with odd characters")
+    Indexer(cfg, db, embedder).run()
+    assert [p.rsplit("/", 1)[-1] for p in db.all_paths()] == ["price$5 x~$y.txt"]

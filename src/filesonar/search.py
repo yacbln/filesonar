@@ -11,7 +11,11 @@ from .config import SearchConfig
 from .db import Database
 from .models import Embedder, ModelError
 
-_RRF_K = 60
+# Reciprocal rank fusion constant. The textbook value is 60; measured on a real
+# 16,000-file index (local + Google Drive), 5 lets a strong keyword match on rare
+# words win (top-3 recall 64-76% -> 86-95%) without hurting meaning-only queries
+# (top-3 77% -> 78%). A smaller constant gives the first ranks of each list more say.
+_RRF_K = 5
 _WORD = re.compile(r"\w+", re.UNICODE)
 KINDS = ("document", "pdf", "image", "text")
 SOURCES = ("local", "drive")
@@ -90,6 +94,16 @@ def _snippet(text: str, query: str) -> str:
     end = start + SNIPPET_CHARS
     piece = flat[start:end]
     return ("…" if start else "") + piece + ("…" if end < len(flat) else "")
+
+
+def fuse(lists: list[tuple[list[int], float]], k: int | None = None) -> dict[int, float]:
+    """Reciprocal rank fusion: each list adds ``weight / (k + rank)`` to an item's score."""
+    k = _RRF_K if k is None else k
+    scores: dict[int, float] = {}
+    for items, weight in lists:
+        for rank, item in enumerate(items):
+            scores[item] = scores.get(item, 0.0) + weight / (k + rank)
+    return scores
 
 
 def _preference(row) -> tuple[bool, float]:
@@ -171,19 +185,17 @@ class Searcher:
         filtered = any(v is not None for v in (kind, prefix, after, before, source))
         depth = 400 if filtered else max(60, limit * 8)
 
-        ranks: dict[int, float] = {}
+        lists: list[tuple[list[int], float]] = []
         match = fts_query(query)
         if match:
-            for rank, (cid, _score) in enumerate(self.db.fts_search(match, depth)):
-                ranks[cid] = ranks.get(cid, 0.0) + 1.0 / (_RRF_K + rank)
+            lists.append(([cid for cid, _ in self.db.fts_search(match, depth)], 1.0))
         # Typing (part of) a file name exactly should put that file first.
         name_match = name_phrase_query(query)
         if name_match:
-            for rank, (cid, _score) in enumerate(self.db.fts_search(name_match, depth)):
-                ranks[cid] = ranks.get(cid, 0.0) + 2.0 / (_RRF_K + rank)
+            lists.append(([cid for cid, _ in self.db.fts_search(name_match, depth)], 2.0))
         self.last_warning = None
-        for rank, cid in enumerate(self._vector_hits(query, depth)):
-            ranks[cid] = ranks.get(cid, 0.0) + 1.0 / (_RRF_K + rank)
+        lists.append((self._vector_hits(query, depth), 1.0))
+        ranks = fuse(lists)
         if not ranks:
             return []
 

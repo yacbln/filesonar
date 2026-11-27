@@ -64,3 +64,4 @@ ignore = ["S101", "S603", "S607"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S", "B011"]
+"scripts/*" = ["S311"]  # sampling for measurements, not security

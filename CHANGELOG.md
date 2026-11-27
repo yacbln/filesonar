@@ -6,6 +6,8 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-11-27
+
 - Search results carry the sending rule themselves (`how_to_send`) and flag files too
   large for a chat (`too_large_for_chat`). Found with a local model that skipped the
   skill and tried to attach a result's original path. The skill description now

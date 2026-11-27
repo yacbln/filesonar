@@ -6,6 +6,8 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-27
+
 - Audio and video: what is said (speech recognition on this computer with
   faster-whisper, offered by `filesonar setup`; time marks like `[1:05]` in results),
   what a video shows (four frames described by the vision model in one call), and

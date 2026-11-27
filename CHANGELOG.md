@@ -6,6 +6,11 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+- Photo descriptions no longer echo the prompt ("not a photo, screenshot, receipt or
+  diagram") or state what an image lacks ("there is no visible text or brands"); such
+  sentences made unrelated images match searches for those words.
+- `filesonar init` creates the config folder with private (0700) permissions.
+
 - `filesonar doctor` warns when Ollama has a model only partly in GPU memory, which
   makes photo descriptions several times slower.
 

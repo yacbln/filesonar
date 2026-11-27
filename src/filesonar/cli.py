@@ -50,7 +50,10 @@ def cmd_init(args: argparse.Namespace) -> int:
     if path.exists() and not args.force:
         print(f"{path} already exists (use --force to overwrite)", file=sys.stderr)
         return 1
-    path.parent.mkdir(parents=True, exist_ok=True)
+    new_dir = not path.parent.exists()
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if new_dir:
+        os.chmod(path.parent, 0o700)  # mkdir's mode is reduced by the umask
     fd = os.open(path, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as fh:
         fh.write(EXAMPLE_CONFIG)

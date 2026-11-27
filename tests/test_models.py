@@ -130,3 +130,48 @@ def test_runaway_caption_is_cleaned_and_generation_is_capped():
     assert text == "Logo text JIACHE"
     assert seen["options"]["num_predict"] <= 300
     assert seen["options"]["repeat_penalty"] > 1
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        # The prompt's own examples echoed back as negatives.
+        (
+            "The image is a logo design featuring a gift box. The image is a digital "
+            "illustration, not a photo, screenshot, scanned document, receipt, or diagram.",
+            "The image is a logo design featuring a gift box. The image is a digital illustration.",
+        ),
+        # A sentence that only reports absence is dropped.
+        (
+            "A white arrow on a black background. There is no visible text, brands, or "
+            "numbers within this image. The design is simple.",
+            "A white arrow on a black background. The design is simple.",
+        ),
+        # The informative start of a sentence is kept.
+        (
+            "The image is a completely black screen with no discernible content such as "
+            "photos or receipts. It looks like a loading error.",
+            "The image is a completely black screen. It looks like a loading error.",
+        ),
+        # Real content that happens to contain "no" stays.
+        (
+            "A receipt from Home Depot showing 3 items. No returns are accepted after 90 days.",
+            "A receipt from Home Depot showing 3 items. No returns are accepted after 90 days.",
+        ),
+        ("A screenshot of a chat. There is no text visible.", "A screenshot of a chat."),
+        # Never return nothing.
+        ("There is no visible content.", "There is no visible content."),
+    ],
+)
+def test_drop_absence_sentences(raw, expected):
+    from filesonar.models import drop_absence_sentences
+
+    assert drop_absence_sentences(raw) == expected
+
+
+def test_caption_prompt_lists_no_categories():
+    """Listing example categories made the model echo them ("not a receipt, diagram")."""
+    from filesonar.models import CAPTION_PROMPT
+
+    assert "receipt" not in CAPTION_PROMPT and "diagram" not in CAPTION_PROMPT
+    assert "absent" in CAPTION_PROMPT and "instructions" in CAPTION_PROMPT

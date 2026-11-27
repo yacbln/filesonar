@@ -32,6 +32,9 @@ def test_init_writes_private_config_and_refuses_overwrite(tmp_path, capsys):
     assert cli.main(["-c", str(path), "init"]) == 0
     assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
     assert cli.main(["-c", str(path), "init"]) == 1
+    nested = tmp_path / "fresh" / "config.toml"
+    assert cli.main(["-c", str(nested), "init"]) == 0
+    assert stat.S_IMODE(nested.parent.stat().st_mode) == 0o700
     assert cli.main(["-c", str(path), "init", "--force"]) == 0
 
 

@@ -10,7 +10,7 @@ readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.11"
-authors = [{ name = "filesonar contributors" }]
+authors = [{ name = "Yacine Boulaioune" }]
 keywords = ["search", "semantic-search", "mcp", "ollama", "ocr", "rag", "openclaw", "local-first"]
 classifiers = [
     "Development Status :: 3 - Alpha",

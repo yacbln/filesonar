@@ -6,6 +6,8 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-27
+
 Found by installing 0.1.0 on fresh Ubuntu 24.04 and 22.04 machines, step by step as
 the README says:
 

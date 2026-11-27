@@ -65,7 +65,7 @@ filesonar handles private files, so a few things are not negotiable:
 ## Releasing (maintainers)
 
 1. Move the "Unreleased" entries in `CHANGELOG.md` under a new version heading and set
-   the same `version` in `pyproject.toml`.
+   `__version__` in `src/filesonar/__init__.py` (the only place the version lives).
 2. Commit, then tag and push: `git tag v0.2.0 && git push origin v0.2.0`.
 3. The `Release` workflow tests, builds and publishes to PyPI through trusted publishing
    (no API token exists to leak). It refuses a tag that does not match the version.

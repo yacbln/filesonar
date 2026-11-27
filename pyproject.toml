@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "filesonar"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Local, private search over what your files contain (documents, PDFs, images), exposed to AI agents over MCP."
 readme = "README.md"
 license = "MIT"
@@ -48,6 +48,9 @@ filesonar = "filesonar.cli:main"
 [project.urls]
 Homepage = "https://github.com/yacbln/filesonar"
 Issues = "https://github.com/yacbln/filesonar/issues"
+
+[tool.hatch.version]
+path = "src/filesonar/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/filesonar"]

@@ -6,6 +6,28 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+- Audio and video: what is said (speech recognition on this computer with
+  faster-whisper, offered by `filesonar setup`; time marks like `[1:05]` in results),
+  what a video shows (four frames described by the vision model in one call), and
+  duration, resolution, recording date, title and artist. Music and noise give no
+  made-up transcript: language confidence is checked before transcribing. Recordings are
+  read through the open file (never loaded into memory, never followed through a
+  symlink) and capped at `media.max_size_mb` and `media.max_minutes`. Without ffmpeg or
+  the speech model they are findable by name and read again once those are installed.
+  New `kind` filters: `audio` and `video`.
+- Google Drive recordings are not downloaded: they are described from Drive's preview
+  image and its duration and size; a copy on this computer (same MD5) gives its
+  transcript.
+- `save_to_computer` downloads a Drive file into `~/Downloads` (`downloads_dir`),
+  never overwriting, and returns the local copy instead if there is one.
+- `share_file` streams uploads from disk, so it works for large videos (it was limited
+  to `max_file_size_mb`); a retried upload sends the whole file again.
+- `prepare_file` refuses files over `outbox_max_mb` (50 MB, what chat apps send) and
+  says to send a Drive link instead.
+- `filesonar setup` checks for ffmpeg, offers speech recognition (installed into
+  filesonar's own environment, with `pipx inject` for pipx installs) and offers
+  `~/Videos` and `~/Music`; `doctor` reports both; `uninstall` deletes the speech model.
+
 ## [0.2.0] - 2026-11-27
 
 - New formats: PowerPoint and LibreOffice Impress slides (`.pptx`, `.odp`; results point

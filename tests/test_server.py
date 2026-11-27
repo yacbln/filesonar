@@ -58,7 +58,7 @@ def test_invalid_arguments_become_tool_errors(server):
             asyncio.run(server.call_tool("search_files", args))
     # the reason reaches the agent, so it can correct itself
     for args, reason in (
-        ({"query": "x", "kind": "video"}, "kind must be one of"),
+        ({"query": "x", "kind": "hologram"}, "kind must be one of"),
         ({"query": ""}, "query is empty"),
         ({"query": "x", "modified_after": "last week"}, "YYYY|date"),
     ):

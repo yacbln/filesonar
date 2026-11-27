@@ -8,6 +8,7 @@ to disk and never execute anything embedded in a file.
 from __future__ import annotations
 
 import errno
+import hashlib
 import io
 import logging
 import os
@@ -23,9 +24,9 @@ import pytesseract
 from docx import Document
 from PIL import ExifTags, Image, ImageFile, ImageOps, UnidentifiedImageError
 
-from . import office
-from .config import IndexConfig
-from .models import Captioner, ModelError
+from . import media, office
+from .config import IndexConfig, MediaConfig
+from .models import VIDEO_PROMPT, Captioner, ModelError
 from .office import html_to_text
 
 log = logging.getLogger(__name__)
@@ -62,8 +63,15 @@ OFFICE_EXTENSIONS = {".pptx", ".pptm", ".xlsx", ".xlsm", ".odt", ".ods", ".odp",
 HTML_EXTENSIONS = {".html", ".htm", ".xhtml"}
 
 SUPPORTED_EXTENSIONS = (
-    TEXT_EXTENSIONS | IMAGE_EXTENSIONS | PDF_EXTENSIONS | DOCX_EXTENSIONS | OFFICE_EXTENSIONS
+    TEXT_EXTENSIONS
+    | IMAGE_EXTENSIONS
+    | PDF_EXTENSIONS
+    | DOCX_EXTENSIONS
+    | OFFICE_EXTENSIONS
+    | media.AUDIO_EXTENSIONS
+    | media.VIDEO_EXTENSIONS
 )
+MEDIA_KINDS = ("audio", "video")
 
 # Below this many characters of real text on a PDF page we try OCR instead.
 _MIN_PAGE_TEXT = 25
@@ -100,6 +108,10 @@ def kind_for(path: Path) -> str | None:
         return "image"
     if ext in TEXT_EXTENSIONS:
         return "text"
+    if ext in media.AUDIO_EXTENSIONS:
+        return "audio"
+    if ext in media.VIDEO_EXTENSIONS:
+        return "video"
     return None
 
 
@@ -143,7 +155,7 @@ def extract_text(path: Path, data: bytes, cfg: IndexConfig) -> Extraction:
     if path.suffix.lower() in HTML_EXTENSIONS:
         # A saved web page is mostly markup, scripts and styles: keep what a reader sees.
         title, text = html_to_text(text)
-        details = _join_details(title=title)
+        details = join_details(title=title)
         segments = [Segment(_clean(text))]
         if details:
             segments.append(Segment(details, source="metadata"))
@@ -162,28 +174,28 @@ def extract_office(path: Path, data: bytes, cfg: IndexConfig) -> Extraction:
         title, author = office.ooxml_properties(arc)
         slides = office.pptx_slides(arc)
         segments = [Segment(_clean(t), page=n) for n, t in enumerate(slides, 1) if t.strip()]
-        details = _join_details(title=title, author=author, slides=str(len(slides)))
+        details = join_details(title=title, author=author, slides=str(len(slides)))
     elif ext in (".xlsx", ".xlsm"):
         title, author = office.ooxml_properties(arc)
         sheets = office.xlsx_sheets(arc)
         segments = [Segment(_clean(f"Sheet {name}\n{rows}")) for name, rows in sheets]
-        details = _join_details(title=title, author=author, sheets=str(len(sheets)))
+        details = join_details(title=title, author=author, sheets=str(len(sheets)))
     elif ext == ".epub":
         title, author, chapters = office.epub_book(arc)
         segments = [Segment(_clean(t)) for t in chapters]
-        details = _join_details(title=title, author=author)
+        details = join_details(title=title, author=author)
     else:  # OpenDocument
         title, author = office.odf_properties(arc)
         parts = office.odf_parts(arc)
         if ext == ".odp":
             segments = [Segment(_clean(t), page=n) for n, (_, t) in enumerate(parts, 1) if t]
-            details = _join_details(title=title, author=author, slides=str(len(parts)))
+            details = join_details(title=title, author=author, slides=str(len(parts)))
         elif ext == ".ods":
             segments = [Segment(_clean(f"Sheet {name}\n{t}")) for name, t in parts if t]
-            details = _join_details(title=title, author=author, sheets=str(len(parts)))
+            details = join_details(title=title, author=author, sheets=str(len(parts)))
         else:
             segments = [Segment(_clean(t)) for _, t in parts if t]
-            details = _join_details(title=title, author=author)
+            details = join_details(title=title, author=author)
     if details:
         segments.append(Segment(details, source="metadata"))
     return Extraction(kind="document", segments=segments, details=details)
@@ -199,7 +211,7 @@ def extract_docx(path: Path, data: bytes, cfg: IndexConfig) -> Extraction:
         for row in table.rows:
             parts.append(" | ".join(cell.text for cell in row.cells))
     props = doc.core_properties
-    details = _join_details(
+    details = join_details(
         title=props.title,
         author=props.author,
         created=props.created.date().isoformat() if props.created else None,
@@ -219,7 +231,7 @@ def extract_pdf(path: Path, data: bytes, cfg: IndexConfig) -> Extraction:
         if doc.needs_pass:
             return Extraction(kind="pdf", details="password protected")
         meta = doc.metadata or {}
-        details = _join_details(
+        details = join_details(
             title=meta.get("title"),
             author=meta.get("author"),
             pages=str(doc.page_count),
@@ -279,7 +291,7 @@ def _exif_summary(image: Image.Image) -> str | None:
             when = None
     camera = camera_name(exif.get(_EXIF_MAKE), exif.get(_EXIF_MODEL))
     # GPS coordinates are deliberately not stored: they reveal where people live.
-    return _join_details(taken=when, camera=camera or None)
+    return join_details(taken=when, camera=camera or None)
 
 
 def extract_image(
@@ -300,7 +312,7 @@ def extract_image(
         raise ExtractionError(f"unreadable image: {exc}") from exc
 
     width, height = image.size
-    details = _join_details(size=f"{width}x{height}", extra=exif_details)
+    details = join_details(size=f"{width}x{height}", extra=exif_details)
     segments: list[Segment] = []
     captioned = False
 
@@ -346,7 +358,7 @@ class ExtractionError(RuntimeError):
 _PLACEHOLDERS = {"unknown", "unknown title", "unknown author", "untitled", "none", "null", "-"}
 
 
-def _join_details(extra: str | None = None, **fields: str | None) -> str | None:
+def join_details(extra: str | None = None, **fields: str | None) -> str | None:
     parts = [
         f"{k}: {str(v).strip()}"
         for k, v in fields.items()
@@ -357,11 +369,73 @@ def _join_details(extra: str | None = None, **fields: str | None) -> str | None:
     return "; ".join(parts) or None
 
 
-def read_regular_file(path: Path, max_bytes: int) -> tuple[bytes, os.stat_result]:
-    """Read a file in one go without following a symlink at the last path component.
+# -- audio and video -------------------------------------------------------------
+
+
+def extract_media(
+    path: Path,
+    fd: int,
+    cfg: MediaConfig,
+    captioner: Captioner | None = None,
+    transcriber: media.Transcriber | None = None,
+) -> Extraction:
+    """What is said and shown in a recording, read from an open file descriptor."""
+    kind = kind_for(path) or "video"
+    try:
+        info = media.probe(fd)
+    except media.MediaError as exc:
+        raise ExtractionError(str(exc)) from exc
+    segments: list[Segment] = []
+    # "captioned" means "nothing left to describe". Only a vision model that is
+    # configured but not there yet (or failed) leaves it False, to be retried later.
+    captioned = not (info.has_video and cfg.frames and captioner is not None)
+    language = None
+    if cfg.transcribe and info.has_audio and transcriber is not None and transcriber.available():
+        try:
+            transcript = transcriber.transcribe(media.decode_audio(fd, cfg.max_minutes * 60))
+        except Exception as exc:  # decoding or the speech library: lose this transcript only
+            log.warning("%s: could not read the sound: %s", path, exc)
+        else:
+            text = media.transcript_text(transcript)
+            if text:
+                segments.append(Segment(_clean(text), source="speech"))
+                language = transcript.language
+    if not captioned and captioner.available():
+        times = media.frame_times(info.duration, cfg.frames)
+        sheet = media.contact_sheet(fd, times)
+        if sheet is None:
+            captioned = True  # no frame could be read; trying again would not help
+        else:
+            try:
+                caption = captioner.caption(sheet, prompt=VIDEO_PROMPT.format(n=len(times)))
+            except ModelError as exc:
+                log.warning("%s: frames not described: %s", path, exc)  # retried later
+                caption = ""
+            if caption:
+                segments.append(Segment(caption, source="caption"))
+                captioned = True
+    tags = info.tags
+    details = join_details(
+        title=tags.get("title"),
+        artist=tags.get("artist") or tags.get("album_artist"),
+        album=tags.get("album"),
+        duration=media.duration_text(info.duration) if info.duration else None,
+        recorded=info.created,
+        size=f"{info.width}x{info.height}" if info.has_video and info.width else None,
+        language=language,
+        extra="no sound" if info.has_video and not info.has_audio else None,
+    )
+    if details:
+        segments.append(Segment(details, source="metadata"))
+    return Extraction(kind=kind, segments=segments, details=details, captioned=captioned)
+
+
+def open_regular_file(path: Path, max_bytes: int) -> tuple[int, os.stat_result]:
+    """Open a file for reading without following a symlink at the last path component.
 
     Opening once and checking the open descriptor (rather than the name) means the file
     cannot be swapped for a link to something else between the check and the read.
+    The caller closes the descriptor.
     """
     flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_CLOEXEC", 0)
     try:
@@ -370,12 +444,33 @@ def read_regular_file(path: Path, max_bytes: int) -> tuple[bytes, os.stat_result
         if exc.errno == errno.ELOOP:
             raise ExtractionError("refusing to follow a symbolic link") from None
         raise
-    with os.fdopen(fd, "rb") as fh:
-        st = os.fstat(fh.fileno())
+    try:
+        st = os.fstat(fd)
         if not stat.S_ISREG(st.st_mode):
             raise ExtractionError("not a regular file")
         if st.st_size > max_bytes:
             raise FileTooLarge(st.st_size)
+    except BaseException:
+        os.close(fd)
+        raise
+    return fd, st
+
+
+def hash_open_file(fd: int) -> tuple[str, str]:
+    """SHA-256 and MD5 of an open file, read in pieces (recordings can be gigabytes)."""
+    sha, md5 = hashlib.sha256(), hashlib.md5(usedforsecurity=False)
+    offset = 0
+    while chunk := os.pread(fd, 1024 * 1024, offset):
+        sha.update(chunk)
+        md5.update(chunk)
+        offset += len(chunk)
+    return sha.hexdigest(), md5.hexdigest()
+
+
+def read_regular_file(path: Path, max_bytes: int) -> tuple[bytes, os.stat_result]:
+    """Read a whole file at once (see ``open_regular_file``)."""
+    fd, st = open_regular_file(path, max_bytes)
+    with os.fdopen(fd, "rb") as fh:
         data = fh.read(max_bytes + 1)
     if len(data) > max_bytes:
         raise FileTooLarge(len(data))

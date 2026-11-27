@@ -178,20 +178,48 @@ class DriveConfig:
 
 
 @dataclass(frozen=True)
+class MediaConfig:
+    # Audio and video: index what is said (speech to text on this computer), what a
+    # video shows (a few frames described by the vision model) and their details.
+    # Needs ffmpeg; speech also needs the optional extra (`filesonar setup` offers it).
+    enabled: bool = True
+    transcribe: bool = True
+    # faster-whisper model: tiny, base (default, ~140 MB), small (~460 MB) or medium.
+    speech_model: str = "base"
+    # Recordings larger than this are indexed by name and details only.
+    max_size_mb: float = 4096.0
+    # Only the first part of long recordings is transcribed.
+    max_minutes: float = 60.0
+    # Frames of each video shown to the vision model (0 to skip).
+    frames: int = 4
+
+
+@dataclass(frozen=True)
 class Config:
     roots: tuple[Path, ...]
     exclude: tuple[str, ...] = ()
     data_dir: Path = field(default_factory=default_data_dir)
     outbox_dir: Path = field(default_factory=default_outbox_dir)
+    # Largest file prepare_file copies for sending in chat. WhatsApp and Telegram send
+    # at most 50 MB by default; larger files are better sent as a Drive link.
+    outbox_max_mb: float = 50.0
+    # Where save_to_computer puts files downloaded from Google Drive.
+    downloads_dir: Path = field(default_factory=lambda: Path.home() / "Downloads")
     models: ModelConfig = field(default_factory=ModelConfig)
     index: IndexConfig = field(default_factory=IndexConfig)
     search: SearchConfig = field(default_factory=SearchConfig)
     drive: DriveConfig = field(default_factory=DriveConfig)
+    media: MediaConfig = field(default_factory=MediaConfig)
     source: Path | None = None
 
     @property
     def db_path(self) -> Path:
         return self.data_dir / "index.sqlite3"
+
+    @property
+    def models_dir(self) -> Path:
+        """Downloaded speech model (kept with the index, so uninstall finds it)."""
+        return self.data_dir / "models"
 
     def excluded(self, path: Path, root: Path) -> bool:
         """Built-in rules apply to the full path; user rules to the path inside ``root``."""
@@ -272,6 +300,13 @@ def _validate(cfg: Config) -> None:
     d = cfg.drive
     if d.poll_minutes < 1:
         raise ConfigError("drive.poll_minutes must be at least 1")
+    m = cfg.media
+    if m.speech_model not in ("tiny", "base", "small", "medium"):
+        raise ConfigError("media.speech_model must be one of: tiny, base, small, medium")
+    if m.max_size_mb <= 0 or m.max_minutes <= 0:
+        raise ConfigError("media.max_size_mb and media.max_minutes must be positive")
+    if not 0 <= m.frames <= 9:
+        raise ConfigError("media.frames must be between 0 and 9")
     if not d.share_folder.strip() or "/" in d.share_folder or d.share_folder in (".", ".."):
         raise ConfigError("drive.share_folder must be a plain folder name")
     if not cfg.roots and not d.enabled:
@@ -303,7 +338,10 @@ def load_config(path: Path | None = None) -> Config:
 
 
 def config_from_dict(raw: dict, base: Path, source: Path | None = None) -> Config:
-    allowed = {"roots", "exclude", "data_dir", "outbox_dir", "models", "index", "search", "drive"}
+    allowed = {
+        "roots", "exclude", "data_dir", "outbox_dir", "outbox_max_mb", "downloads_dir", "models",
+        "index", "search", "drive", "media",
+    }  # fmt: skip
     unknown = set(raw) - allowed
     if unknown:
         raise ConfigError(f"unknown top-level option(s): {', '.join(sorted(unknown))}")
@@ -329,7 +367,18 @@ def config_from_dict(raw: dict, base: Path, source: Path | None = None) -> Confi
             raise ConfigError("outbox_dir must be a path")
         outbox_dir = _resolve_root(raw["outbox_dir"], base)
 
-    for section in ("models", "index", "search", "drive"):
+    outbox_max_mb = raw.get("outbox_max_mb", 50.0)
+    if not isinstance(outbox_max_mb, int | float) or isinstance(outbox_max_mb, bool):
+        raise ConfigError("outbox_max_mb must be a number")
+    if outbox_max_mb <= 0:
+        raise ConfigError("outbox_max_mb must be positive")
+    downloads_dir = Path.home() / "Downloads"
+    if "downloads_dir" in raw:
+        if not isinstance(raw["downloads_dir"], str):
+            raise ConfigError("downloads_dir must be a path")
+        downloads_dir = _resolve_root(raw["downloads_dir"], base)
+
+    for section in ("models", "index", "search", "drive", "media"):
         if section in raw and not isinstance(raw[section], dict):
             raise ConfigError(f"[{section}] must be a table")
 
@@ -338,10 +387,13 @@ def config_from_dict(raw: dict, base: Path, source: Path | None = None) -> Confi
         exclude=tuple(exclude_raw),
         data_dir=data_dir,
         outbox_dir=outbox_dir,
+        outbox_max_mb=float(outbox_max_mb),
+        downloads_dir=downloads_dir,
         models=_build(ModelConfig, raw.get("models", {}), "models"),
         index=_build(IndexConfig, raw.get("index", {}), "index"),
         search=_build(SearchConfig, raw.get("search", {}), "search"),
         drive=_build(DriveConfig, raw.get("drive", {}), "drive"),
+        media=_build(MediaConfig, raw.get("media", {}), "media"),
         source=source,
     )
     _validate(cfg)
@@ -370,6 +422,10 @@ exclude = []
 # (OpenClaw's media folder) so it can be attached without any shell command.
 # Copies are deleted after 24 hours.
 # outbox_dir = "~/.openclaw/media/filesonar"
+# Larger files are offered as a Google Drive link instead (chat apps send 50 MB):
+# outbox_max_mb = 50
+# Where files fetched from Google Drive are saved on this computer:
+# downloads_dir = "~/Downloads"
 
 [models]
 # Ollama server. Only addresses on this machine are accepted unless
@@ -402,6 +458,16 @@ exclude = []
 include_shared = false  # also index files shared with you
 share_folder = "filesonar"
 poll_minutes = 5
+
+[media]
+# Audio and video: what is said (speech to text on this computer), what a video
+# shows (a few frames described by the vision model), duration and date.
+# Needs ffmpeg; `filesonar setup` sets up speech recognition.
+enabled = true
+transcribe = true
+speech_model = "base"   # tiny, base, small or medium: bigger is better and slower
+max_minutes = 60        # transcribe at most the first hour of each recording
+frames = 4              # video frames described (0 to skip)
 """
 
 
@@ -474,3 +540,26 @@ def write_private(path: Path, text: str) -> None:
     with os.fdopen(fd, "w") as fh:
         fh.write(text)
     os.replace(tmp, path)
+
+
+def add_roots(text: str, new_roots: list[Path]) -> str:
+    """Add folders to the top-level ``roots`` list of a config file, keeping the rest."""
+    raw = tomllib.loads(text)
+    current = [str(r) for r in raw.get("roots", [])]
+    home = Path.home()
+    for root in new_roots:
+        try:
+            shown = "~/" + root.relative_to(home).as_posix()
+        except ValueError:
+            shown = root.as_posix()
+        if shown not in current and str(root) not in current:
+            current.append(shown)
+    block = "roots = [\n" + "".join(f"  {_toml_string(r)},\n" for r in current) + "]"
+    head_end = re.search(r"^\s*\[", text, re.MULTILINE)
+    head, tail = (text[: head_end.start()], text[head_end.start() :]) if head_end else (text, "")
+    found = re.search(r"^roots\s*=\s*\[.*?\]", head, re.MULTILINE | re.DOTALL)
+    head = head[: found.start()] + block + head[found.end() :] if found else block + "\n" + head
+    new = head + tail
+    if tomllib.loads(new).get("roots") != current:  # never write a file we misread
+        raise ConfigError("could not update roots in the config file")
+    return new

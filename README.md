@@ -31,6 +31,8 @@ Optionally, it can also index your [Google Drive](#google-drive) — the files a
 | PowerPoint (`.pptx`), LibreOffice Impress (`.odp`) | Text of each slide, with speaker notes; results point to the slide |
 | Excel (`.xlsx`), LibreOffice Calc (`.ods`) | Every sheet, row by row, with the sheet name |
 | E-books (`.epub`) | Chapters in reading order, title and author |
+| Videos (`.mp4`, `.mov`, `.mkv`, `.webm`, …) | What is said (speech recognition on this computer, with time marks), what is shown (a few frames described by the vision model), duration, resolution and recording date |
+| Audio (`.mp3`, `.m4a`, `.wav`, `.ogg`/`.opus` voice notes, …) | What is said; music is found by its title, artist and album rather than by misheard "lyrics" |
 | Images (`.jpg`, `.png`, `.webp`, `.gif`, `.bmp`, `.tiff`) | A local vision model describes what the picture shows; OCR reads any text (receipts, screenshots, slides); date and camera from EXIF |
 | Web pages (`.html`) | What a reader sees: no markup, scripts or styles |
 | Text (`.txt`, `.md`, `.csv`, `.json`, …) | As is |
@@ -94,14 +96,15 @@ journalctl --user -u filesonar-watch -f     # see what it is doing
 
 ## Use it from an AI agent
 
-`filesonar serve` speaks MCP over stdio. Three tools are read-only; `prepare_file` writes, but only copies into its own outbox folder; `share_file` exists only when Google Drive is enabled:
+`filesonar serve` speaks MCP over stdio. Three tools are read-only; `prepare_file` writes, but only copies into its own outbox folder; `share_file` and `save_to_computer` exist only when Google Drive is enabled:
 
 | Tool | What it does |
 |---|---|
 | `search_files` | Ranked results with path, kind, date, the passage that matched and why it matched (text, OCR, caption or metadata). Identical copies of a file are one result, with the other locations listed. Filters for kind, folder, date range and source (`local` or `drive`). Drive results include their Drive folder and a private link. |
 | `file_info` | Details and a short text preview for a file **that is already in the index**. It cannot be used to open arbitrary paths. |
-| `prepare_file` | Copies a file **that is already in the index** into the outbox folder (by default OpenClaw's media folder, `~/.openclaw/media/filesonar`) and returns the copy's path, so a chat agent can attach it to a message. Copies are private and deleted after 24 hours. Works for Drive files too (downloaded, or taken from the identical local copy); Google Docs and Slides arrive as PDF, Sheets as `.xlsx`. |
-| `share_file` | Returns a Google Drive link for an indexed laptop file. If the same file (same MD5) is already in your Drive, that link is returned and nothing is uploaded; otherwise a copy is uploaded to a `filesonar` folder in your Drive. Links are private: only you can open them. Handy for files too large to attach. |
+| `prepare_file` | Copies a file **that is already in the index** into the outbox folder (by default OpenClaw's media folder, `~/.openclaw/media/filesonar`) and returns the copy's path, so a chat agent can attach it to a message. Copies are private and deleted after 24 hours. Works for Drive files too (downloaded, or taken from the identical local copy); Google Docs and Slides arrive as PDF, Sheets as `.xlsx`. Files over `outbox_max_mb` (50 MB, what WhatsApp and Telegram send by default) are refused with a hint to send a Drive link instead. |
+| `share_file` | Returns a Google Drive link for an indexed laptop file. If the same file (same MD5) is already in your Drive, that link is returned and nothing is uploaded; otherwise a copy is uploaded (streamed, so large videos are fine) to a `filesonar` folder in your Drive. Links are private: only you can open them. The way to send files too large for chat. |
+| `save_to_computer` | Downloads a Google Drive file into your Downloads folder (Docs and Slides as PDF, Sheets as `.xlsx`). Never overwrites anything: a name already in use gets ` (1)`. If the same file is already on your computer, its path is returned instead. |
 | `index_status` | How many files are indexed and when the index last changed. |
 
 Why `prepare_file`? Chat agents usually may only view or send files inside their own folders. Without it, an agent asked to "send me that photo" will try to run `cp`, a shell command that could write anywhere and so needs your approval each time. `prepare_file` does the one safe copy itself, and because it is marked as non-destructive and local, OpenClaw runs it without a prompt.
@@ -235,6 +238,7 @@ filesonar reads your personal files, so it is built to be boring and predictable
 - **No symlink surprises.** Symbolic links are never followed, and a file whose real location is outside your indexed folders is skipped.
 - **The agent only sees the index.** The MCP server never opens a path that is not in the index, returns short snippets (and at most a 2,000-character preview), and tells the agent to treat file contents as data rather than instructions — a defence against documents that try to give orders to AI assistants.
 - **`prepare_file` can only copy, and only into its outbox.** It copies files that are in the index and still allowed by your config, reads them without following symlinks, writes `0600` copies into `0700` folders inside `outbox_dir`, never writes through a symlink, and only ever deletes its own copies older than 24 hours. Your original files are never modified. The outbox is never indexed.
+- **Recordings stay on your machine.** Speech is recognised locally; the speech model is downloaded once during setup (from Hugging Face) and indexing never goes online. Videos in Google Drive are described from Drive's preview image and details, without downloading them.
 - **GPS coordinates are not stored.** Photo dates and camera models are, locations are not.
 - **The index is private.** It is a single SQLite file created with `0600` permissions inside a `0700` folder. Delete it at any time; it can be rebuilt from your files.
 - **Defensive parsing.** Images that would decode to more than ~90 megapixels, password-protected PDFs, oversized files and binary files with text extensions are skipped rather than processed.
@@ -295,7 +299,7 @@ pipx uninstall filesonar
 - [x] Hybrid keyword + meaning search, MCP server, folder watcher
 - [x] Google Drive: index files in Drive and keep them in sync (Drive Changes API)
 - [x] `share_file`: a private Drive link to a laptop file, uploading only if it is not in Drive yet
-- [ ] Audio and video (transcripts and key frames)
+- [x] Audio and video: speech, key frames, duration and dates
 - [x] Slides, spreadsheets, OpenDocument and e-books (`.pptx`, `.xlsx`, `.odt`, `.ods`, `.odp`, `.epub`)
 - [ ] Older Office formats (`.doc`, `.xls`, `.ppt`)
 - [ ] macOS support

@@ -32,6 +32,8 @@ class FakeFile:
     export: dict[str, bytes] = field(default_factory=dict)
     photo: dict | None = None
     thumbnail: bytes | None = None
+    size: str | None = None  # reported size, to stand in for a huge file
+    video: dict | None = None  # videoMediaMetadata
 
     def meta(self) -> dict:
         out = {
@@ -45,10 +47,12 @@ class FakeFile:
             "webViewLink": f"https://drive.google.com/file/d/{self.id}/view",
         }
         if not self.mime.startswith("application/vnd.google-apps"):
-            out["size"] = str(len(self.content))
+            out["size"] = self.size or str(len(self.content))
             out["md5Checksum"] = hashlib.md5(self.content).hexdigest()
         if self.photo:
             out["imageMediaMetadata"] = self.photo
+        if self.video:
+            out["videoMediaMetadata"] = self.video
         if self.thumbnail is not None:
             out["thumbnailLink"] = f"https://lh3.googleusercontent.com/t/{self.id}=s220"
         return out
@@ -62,6 +66,7 @@ class FakeDrive:
         self.downloads: list[str] = []
         self.uploads: list[str] = []
         self.thumbnails: list[str] = []
+        self.fail_uploads = 0  # answer this many upload PUTs with a server error
         self.access_tokens = 0
         self.fail_next: list[int] = []  # status codes to return before answering
         self.broken: set[str] = set()  # file ids whose content cannot be downloaded
@@ -136,6 +141,10 @@ class FakeDrive:
             loc = f"https://www.googleapis.com/upload/drive/v3/files?upload_id={session}"
             return httpx.Response(200, headers={"Location": loc})
         if path == "/upload/drive/v3/files" and request.method == "PUT":
+            request.read()  # the body may be streamed from disk
+            if self.fail_uploads:
+                self.fail_uploads -= 1
+                return httpx.Response(503, json={"error": {"message": "backend error"}})
             body = self._sessions.pop(params["upload_id"])
             f = self.add(body["name"], request.content, parent=body["parents"][0])
             self.uploads.append(f.id)

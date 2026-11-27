@@ -87,7 +87,7 @@ class FakeCaptioner:
     def available(self) -> bool:
         return self.is_available
 
-    def caption(self, image_png: bytes) -> str:
+    def caption(self, image_png: bytes, prompt: str | None = None) -> str:
         self.calls += 1
         assert image_png.startswith(b"\x89PNG")
         if self.fail:

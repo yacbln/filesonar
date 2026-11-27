@@ -19,7 +19,7 @@ UTC = timezone.utc  # datetime.UTC needs Python 3.11
 # (top-3 77% -> 78%). A smaller constant gives the first ranks of each list more say.
 _RRF_K = 5
 _WORD = re.compile(r"\w+", re.UNICODE)
-KINDS = ("document", "pdf", "image", "text")
+KINDS = ("document", "pdf", "image", "text", "audio", "video")
 SOURCES = ("local", "drive")
 MAX_LIMIT = 50
 SNIPPET_CHARS = 280

@@ -144,7 +144,7 @@ def test_fts_query_quotes_everything():
     [
         ({"query": ""}, "empty"),
         ({"query": "x" * 1001}, "too long"),
-        ({"query": "a", "kind": "video"}, "kind"),
+        ({"query": "a", "kind": "hologram"}, "kind"),
         ({"query": "a", "modified_after": "yesterday"}, "date"),
     ],
 )

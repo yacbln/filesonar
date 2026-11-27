@@ -18,8 +18,18 @@ from pathlib import Path, PurePosixPath
 from .config import ALWAYS_EXCLUDED, DEFAULT_EXCLUDE, Config
 from .db import Database
 from .drive import FOLDER_MIME, DriveClient, DriveError
-from .extract import Extraction, ExtractionError, Segment, camera_name, extract, kind_for
+from .extract import (
+    MEDIA_KINDS,
+    Extraction,
+    ExtractionError,
+    Segment,
+    camera_name,
+    extract,
+    join_details,
+    kind_for,
+)
 from .indexer import Indexer, IndexReport, _fail
+from .media import duration_text
 from .models import Captioner, Embedder
 from .pathrules import matches_any
 
@@ -109,12 +119,13 @@ class DriveIndexer:
         client: DriveClient,
         captioner: Captioner | None = None,
         progress: Callable[[str], None] | None = None,
+        transcriber=None,
     ):
         self.cfg = cfg
         self.db = db
         self.client = client
         # Shares chunking, embedding and caption rules with local indexing.
-        self.local = Indexer(cfg, db, embedder, captioner, progress)
+        self.local = Indexer(cfg, db, embedder, captioner, progress, transcriber)
         self.progress = self.local.progress
         self._folders: Folders | None = None
 
@@ -158,6 +169,9 @@ class DriveIndexer:
         kind = kind_for(Path(name))
         if kind is None:
             return None
+        if kind in MEDIA_KINDS:
+            # Never downloaded (see _drive_media), so their size does not matter.
+            return kind if self.cfg.media.enabled else None
         size = int(file.get("size") or 0)
         if size > ix.max_file_size_mb * 1024 * 1024:
             return None
@@ -276,7 +290,8 @@ class DriveIndexer:
             return
 
         started = time.monotonic()
-        ocr = self.local._ocr_now()
+        # Recordings are complete with what Drive offers (see _drive_media).
+        ocr = self.local._ocr_now() or kind in MEDIA_KINDS
         try:
             data, extraction = self._fetch_and_extract(file, kind)
         except DriveError as exc:
@@ -295,9 +310,12 @@ class DriveIndexer:
         vectors = self.local.embedder.embed_documents(texts)
         self.local._ensure_vectors(vectors[0])
         self.db.replace_file(
-            **{**meta, "size": meta["size"] or len(data)},
+            **{**meta, "size": meta["size"] or len(data or b"")},
             kind=kind,
-            sha256=hashlib.sha256(data).hexdigest(),
+            # Recordings are not downloaded, so Drive's MD5 stands in for the checksum.
+            sha256=f"md5:{md5 or meta['remote_id']}"
+            if data is None
+            else hashlib.sha256(data).hexdigest(),
             captioned=extraction.captioned,
             status=status,
             error=error,
@@ -349,7 +367,9 @@ class DriveIndexer:
             report.updated += 1
         return True
 
-    def _fetch_and_extract(self, file: dict, kind: str) -> tuple[bytes, Extraction | None]:
+    def _fetch_and_extract(self, file: dict, kind: str) -> tuple[bytes | None, Extraction | None]:
+        if kind in MEDIA_KINDS:
+            return None, self._drive_media(file, kind)
         ix = self.cfg.index
         limit = int(ix.max_file_size_mb * 1024 * 1024)
         name, mime = file["name"], file.get("mimeType", "")
@@ -386,6 +406,45 @@ class DriveIndexer:
         if extraction is not None and kind == "image":
             _add_drive_photo_details(extraction, file)
         return data, extraction
+
+    def _drive_media(self, file: dict, kind: str) -> Extraction:
+        """A recording in Drive, without downloading it (videos can be gigabytes): its
+        duration and size as Drive reports them, and Drive's preview image of a video
+        described like a photo. A copy on this computer, matched by MD5, gives the full
+        transcript instead (see _copy_from_twin)."""
+        info = file.get("videoMediaMetadata") or {}
+        segments: list[Segment] = []
+        captioner = self.local.captioner
+        if (
+            kind == "video"
+            and file.get("thumbnailLink")
+            and self.cfg.media.frames
+            and captioner is not None
+            and captioner.available()
+        ):
+            limit = int(self.cfg.index.max_file_size_mb * 1024 * 1024)
+            try:
+                still = self.client.thumbnail(file["thumbnailLink"], PREVIEW_SIDE, limit)
+                caption = extract(
+                    Path("preview.png"), self.cfg.index, captioner, data=still
+                ).segments
+                segments += [
+                    Segment(s.text, source="caption") for s in caption if s.source == "caption"
+                ]
+            except (DriveError, ExtractionError) as exc:
+                log.info("%s: no preview described (%s)", file.get("name"), exc)
+        try:
+            seconds = int(info.get("durationMillis") or 0) / 1000
+        except (TypeError, ValueError):
+            seconds = 0
+        width, height = info.get("width"), info.get("height")
+        details = join_details(
+            duration=duration_text(seconds) if seconds else None,
+            size=f"{width}x{height}" if width and height else None,
+        )
+        if details:
+            segments.append(Segment(details, source="metadata"))
+        return Extraction(kind=kind, segments=segments, details=details, captioned=True)
 
     def _extract(self, path: Path, data: bytes) -> Extraction | None:
         try:

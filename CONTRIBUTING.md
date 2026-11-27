@@ -48,7 +48,8 @@ the numbers in the pull request. The script only reads the index.
 filesonar handles private files, so a few things are not negotiable:
 
 - no new network destinations, telemetry or "phone home" of any kind (the only ones are
-  the configured Ollama server and, when the user enables it, Google's Drive API)
+  the configured Ollama server, when the user enables it Google's Drive API, and the
+  one-time speech model download in `filesonar setup`; indexing never downloads)
 - the built-in exclusion list (`ALWAYS_EXCLUDED` in `config.py`) can grow but never shrink
 - MCP tools never modify or delete the user's files; a tool that writes anything at all
   (like `prepare_file`, which only writes to its outbox) is discussed in an issue first

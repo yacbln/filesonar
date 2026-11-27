@@ -26,6 +26,7 @@ import webbrowser
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
+from typing import BinaryIO
 
 import httpx
 
@@ -47,7 +48,8 @@ FOLDER_MIME = "application/vnd.google-apps.folder"
 
 FILE_FIELDS = (
     "id,name,mimeType,size,md5Checksum,modifiedTime,parents,webViewLink,trashed,"
-    "ownedByMe,thumbnailLink,imageMediaMetadata(time,cameraMake,cameraModel)"
+    "ownedByMe,thumbnailLink,imageMediaMetadata(time,cameraMake,cameraModel),"
+    "videoMediaMetadata(durationMillis,width,height)"
 )
 _RETRY_STATUS = {429, 500, 502, 503, 504}
 
@@ -338,13 +340,25 @@ class DriveClient:
 
     # -- requests
 
-    def _send(self, method: str, url: str, *, stream: bool = False, **kwargs) -> httpx.Response:
-        """Send with auth, one re-auth on 401 and backoff on rate limits/server errors."""
+    def _send(
+        self,
+        method: str,
+        url: str,
+        *,
+        stream: bool = False,
+        body: Callable[[], Iterator[bytes]] | None = None,
+        **kwargs,
+    ) -> httpx.Response:
+        """Send with auth, one re-auth on 401 and backoff on rate limits/server errors.
+
+        ``body`` makes a fresh request body for each attempt (a file streamed from
+        disk can only be read once per attempt)."""
         delay = 1.0
         reauthed = False
         for attempt in range(6):
             headers = {**kwargs.pop("headers", {}), **self._auth_header()}
-            request = self.http.build_request(method, url, headers=headers, **kwargs)
+            extra = {"content": body()} if body is not None else {}
+            request = self.http.build_request(method, url, headers=headers, **kwargs, **extra)
             kwargs["headers"] = {k: v for k, v in headers.items() if k != "Authorization"}
             resp = self.http.send(request, stream=stream)
             if resp.status_code == 401 and not reauthed:
@@ -369,7 +383,10 @@ class DriveClient:
             raise DriveError(f"Drive API error {resp.status_code}: {_reason(resp)}")
         return resp.json()
 
-    def _download(self, url: str, max_bytes: int, *, auth: bool = True, **kwargs) -> bytes:
+    def _download(
+        self, url: str, max_bytes: int, *, auth: bool = True, sink: BinaryIO | None = None, **kwargs
+    ) -> bytes:
+        """The response body (at most ``max_bytes``), or written to ``sink`` if given."""
         if auth:
             resp = self._send("GET", url, stream=True, **kwargs)
         else:
@@ -386,7 +403,10 @@ class DriveClient:
                 total += len(chunk)
                 if total > max_bytes:
                     raise DriveError("file is larger than the size limit")
-                chunks.append(chunk)
+                if sink is not None:
+                    sink.write(chunk)
+                else:
+                    chunks.append(chunk)
             return b"".join(chunks)
         finally:
             resp.close()
@@ -442,12 +462,19 @@ class DriveClient:
     def get_file(self, file_id: str) -> dict:
         return self._json("GET", f"{API}/files/{_quote(file_id)}", params={"fields": FILE_FIELDS})
 
-    def download(self, file_id: str, max_bytes: int) -> bytes:
-        return self._download(f"{API}/files/{_quote(file_id)}", max_bytes, params={"alt": "media"})
-
-    def export(self, file_id: str, mime: str, max_bytes: int) -> bytes:
+    def download(self, file_id: str, max_bytes: int, sink: BinaryIO | None = None) -> bytes:
         return self._download(
-            f"{API}/files/{_quote(file_id)}/export", max_bytes, params={"mimeType": mime}
+            f"{API}/files/{_quote(file_id)}", max_bytes, params={"alt": "media"}, sink=sink
+        )
+
+    def export(
+        self, file_id: str, mime: str, max_bytes: int, sink: BinaryIO | None = None
+    ) -> bytes:
+        return self._download(
+            f"{API}/files/{_quote(file_id)}/export",
+            max_bytes,
+            params={"mimeType": mime},
+            sink=sink,
         )
 
     def thumbnail(self, link: str, max_side: int, max_bytes: int) -> bytes:
@@ -473,21 +500,46 @@ class DriveClient:
             json={"name": name, "mimeType": FOLDER_MIME},
         )["id"]
 
-    def upload(self, name: str, data: bytes, mime: str, parent: str) -> dict:
-        """Upload ``data`` as a new private file in ``parent`` (resumable protocol)."""
+    def upload(self, name: str, data: bytes | int, mime: str, parent: str, size: int = -1) -> dict:
+        """Upload a new private file in ``parent`` (resumable protocol).
+
+        ``data`` is the content, or an open file descriptor to stream from (with
+        ``size``), so large videos are never held in memory."""
+        if isinstance(data, bytes):
+            size = len(data)
+
+            def body() -> Iterator[bytes]:
+                yield data
+        else:
+            fd = data
+
+            def body() -> Iterator[bytes]:
+                offset = 0
+                while offset < size:
+                    chunk = os.pread(fd, min(8 * 1024 * 1024, size - offset), offset)
+                    if not chunk:
+                        raise DriveError("the file got shorter while it was being uploaded")
+                    offset += len(chunk)
+                    yield chunk
+
         start = self._send(
             "POST",
             f"{UPLOAD_API}/files",
             params={"uploadType": "resumable", "fields": FILE_FIELDS},
             json={"name": name, "parents": [parent]},
-            headers={"X-Upload-Content-Type": mime, "X-Upload-Content-Length": str(len(data))},
+            headers={"X-Upload-Content-Type": mime, "X-Upload-Content-Length": str(size)},
         )
         if start.status_code >= 400:
             raise DriveError(f"upload refused ({start.status_code}): {_reason(start)}")
         location = start.headers.get("Location", "")
         if not location.startswith(UPLOAD_API + "/"):
             raise DriveError("unexpected upload address")
-        resp = self._send("PUT", location, content=data, headers={"Content-Type": mime})
+        resp = self._send(
+            "PUT",
+            location,
+            body=body,
+            headers={"Content-Type": mime, "Content-Length": str(size)},
+        )
         if resp.status_code >= 400:
             raise DriveError(f"upload failed ({resp.status_code}): {_reason(resp)}")
         return resp.json()

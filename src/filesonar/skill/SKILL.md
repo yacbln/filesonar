@@ -12,30 +12,25 @@ metadata:
 
 filesonar keeps a private, local index of what the user's files contain: the text of
 documents and PDFs, text read from scans and screenshots, descriptions of what photos
-show, and dates. If the user enabled it, files in their Google Drive are included.
-It is exposed as an MCP server named `filesonar` with three read-only tools
-(`search_files`, `file_info`, `index_status`), `prepare_file`, which makes a copy of a
-found file that you can attach to a message, and, with Google Drive, `share_file`.
+and videos show, what is said in recordings, and dates. If the user enabled it, files in
+their Google Drive are included. It is exposed as an MCP server named `filesonar` with
+three read-only tools (`search_files`, `file_info`, `index_status`), `prepare_file`,
+which makes a copy of a found file that you can attach to a message, and, with Google
+Drive, `share_file` (a Drive link) and `save_to_computer` (Drive file to the computer).
 
 ## Setup (once)
 
 ```bash
-pipx install git+https://github.com/yacbln/filesonar
-ollama pull nomic-embed-text
-ollama pull qwen2.5vl:7b        # optional: lets photos be found by what they show
-filesonar init                  # then edit ~/.config/filesonar/config.toml
-filesonar index
-openclaw mcp add filesonar --command filesonar --arg serve
-openclaw mcp probe filesonar
+pipx install filesonar
+filesonar setup     # models, folders, this skill, the MCP server, background indexing
 ```
-
-Keep the index fresh with `filesonar watch` (a systemd user unit is in the repository).
 
 ## When to use it
 
 - "Find my car insurance PDF", "where's the lease for the apartment?"
 - "That screenshot with the flight confirmation", "the receipt from the hardware store"
 - "Photos of the beach from last summer", "the picture of the red bike"
+- "The video of the kids opening presents", "the voice note where I talked about the budget"
 - Anything where the user describes a file instead of naming it exactly.
 
 Do **not** fall back to `find`/`grep` over file names first: they miss files whose
@@ -44,12 +39,13 @@ names say nothing about their content (`IMG_2041.jpg`, `scan0003.pdf`).
 ## How to use it
 
 1. Call `search_files` with the user's description in plain words. Add filters only when
-   the user gave them: `kind` (`pdf`, `document`, `image`, `text`; `document` covers
-   Word files, slides, spreadsheets and e-books), `folder`,
+   the user gave them: `kind` (`pdf`, `document`, `image`, `text`, `audio`, `video`;
+   `document` covers Word files, slides, spreadsheets and e-books), `folder`,
    `modified_after` / `modified_before` (`YYYY-MM-DD`).
    Use `source: "drive"` or `"local"` only if the user says where the file is.
 2. Show the top 3 results: file name, folder, date, and in a few words why it matched
-   (`matched_in` is `text`, `ocr`, `caption` or `metadata`). For Drive results
+   (`matched_in` is `text`, `ocr`, `caption`, `speech` or `metadata`; a `speech` snippet
+   starts with the time it was said, like `[1:05]`). For Drive results
    (`source: "drive"`) give the Drive folder (`location`) instead of a path. Ask which
    one they mean unless the first result is clearly right.
 3. If nothing matches, try once more with different wording or without filters, then
@@ -60,10 +56,14 @@ names say nothing about their content (`IMG_2041.jpg`, `scan0003.pdf`).
    returns with your normal message/media tool. This works for photos, PDFs and
    documents alike, on the computer or in Drive; PDFs and documents arrive as a file
    the user can tap to open.
-6. When the user asks for a link, or the file is too large to attach: for a Drive
-   result, give its `link`. For a file on the computer, call `share_file`; it returns a
-   Drive link, uploading a copy only if Drive does not have the file yet. Links open
-   only for the user.
+6. When the user asks for a link, or the file is too large to attach (chat apps carry
+   about 50 MB; `prepare_file` refuses larger files and says so): for a Drive result,
+   give its `link`. For a file on the computer, call `share_file`; it returns a Drive
+   link, uploading a copy only if Drive does not have the file yet. Links open only
+   for the user. Without Google Drive, tell the user where the file is.
+7. When the user wants a Drive file on their computer ("download it", "save it to my
+   laptop"), call `save_to_computer`. It saves into their Downloads folder without
+   overwriting anything, or tells you the file is already on the computer.
 
 ## Rules
 

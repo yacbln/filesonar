@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import contextlib
 import getpass
+import importlib
 import os
 import shlex
 import shutil
@@ -20,10 +21,12 @@ from dataclasses import dataclass, field
 from importlib import resources
 from pathlib import Path
 
+from . import media
 from .config import (
     Config,
     ConfigError,
     ModelConfig,
+    add_roots,
     default_config_path,
     load_config,
     render_config,
@@ -31,11 +34,13 @@ from .config import (
     write_private,
 )
 from .extract import tesseract_available
+from .media import WhisperTranscriber
 from .models import ModelError, OllamaClient
 
 SERVICE_NAME = "filesonar-watch.service"
 DRIVE_SETUP_URL = "https://github.com/yacbln/filesonar#one-time-setup-about-5-minutes"
-CANDIDATE_FOLDERS = ("Documents", "Pictures", "Downloads", "Desktop")
+CANDIDATE_FOLDERS = ("Documents", "Pictures", "Downloads", "Desktop", "Videos", "Music")
+MEDIA_FOLDERS = ("Videos", "Music")
 VISION_DOWNLOAD = "about 6 GB"
 
 Runner = Callable[..., subprocess.CompletedProcess]
@@ -85,6 +90,7 @@ class Options:
     assume_yes: bool = False
     folders: list[Path] = field(default_factory=list)
     vision: bool | None = None  # None: ask (default yes with a GPU)
+    speech: bool | None = None  # speech recognition for audio and video; None: ask
     drive_client_secret: Path | None = None
     openclaw: str | None = None
     claude_code: bool | None = None
@@ -146,22 +152,25 @@ class Setup:
         self.step("2. Text in scans and screenshots (Tesseract)")
         self.tesseract()
 
-        self.step("3. Folders to search")
+        self.step("3. Audio and video")
+        self.media_step(existing)
+
+        self.step("4. Folders to search")
         cfg = self.config(existing, vision)
         if cfg is None:
             return 2
 
-        self.step("4. Google Drive (optional)")
+        self.step("5. Google Drive (optional)")
         cfg = self.drive(cfg, first_run=existing is None)
 
-        self.step("5. AI agents")
+        self.step("6. AI agents")
         self.openclaw()
         self.claude_code(first_run=existing is None)
 
-        self.step("6. Keep the index up to date")
+        self.step("7. Keep the index up to date")
         background = self.service()
 
-        self.step("7. First index")
+        self.step("8. First index")
         self.first_index(cfg, background)
 
         self.summary()
@@ -250,6 +259,91 @@ class Setup:
     def _has_gpu(self) -> bool:
         return bool(self.which("nvidia-smi")) or Path("/dev/kfd").exists()
 
+    def _install_command(self, package: str) -> str:
+        return next(
+            (
+                cmd
+                for tool, cmd in (
+                    ("apt", f"sudo apt install {package}"),
+                    ("dnf", f"sudo dnf install {package}"),
+                    ("pacman", f"sudo pacman -S {package}"),
+                    ("brew", f"brew install {package}"),
+                )
+                if self.which(tool)
+            ),
+            f"install {package} with your package manager",
+        )
+
+    def media_step(self, existing: Config | None) -> None:
+        from .config import MediaConfig, default_data_dir
+
+        mcfg = existing.media if existing else MediaConfig()
+        if not mcfg.enabled:
+            self.ok("audio and video are turned off in the config")
+            return
+        if media.tools_available():
+            self.ok("ffmpeg found")
+        else:
+            self.warn(
+                "ffmpeg is missing, so audio and video are found by name only: "
+                + self._install_command("ffmpeg")
+            )
+        if not mcfg.transcribe:
+            self.ok("speech recognition is turned off in the config")
+            return
+        data_dir = existing.data_dir if existing else default_data_dir()
+        speech = WhisperTranscriber(mcfg.speech_model, data_dir / "models")
+        if speech.ready():
+            self.ok(f"speech recognition ({mcfg.speech_model} model)")
+            return
+        wants = self.opts.speech
+        if wants is None:
+            size = media.MODEL_SIZES.get(mcfg.speech_model, "")
+            print(
+                "  Speech recognition finds recordings by what is said in them, on this computer."
+            )
+            print(f"  It installs about 150 MB of software and a {size} speech model, once.")
+            wants = self.ask.yes("Set it up?")
+        if not wants:
+            self.ok("skipped; recordings are found by what they show and their details")
+            return
+        if not speech.installed() and not self._install_speech():
+            return
+        print(f"  downloading the {mcfg.speech_model} speech model ...")
+        try:
+            speech.download()
+        except media.MediaError as exc:
+            self.warn(f"{exc}; run `filesonar setup` again later")
+            return
+        self.ok("speech recognition ready")
+
+    def _install_speech(self) -> bool:
+        """Install the optional faster-whisper package into filesonar's own environment."""
+        prefix = Path(sys.prefix)
+        pipx = self.which("pipx")
+        if pipx and prefix.parent.name == "venvs" and "pipx" in prefix.parts:
+            cmd = [pipx, "inject", "filesonar", "faster-whisper>=1.1"]  # survives upgrades
+        elif "uv" in prefix.parts and "tools" in prefix.parts:
+            self.warn(
+                "installed with uv: run `uv tool install --force --with faster-whisper "
+                "filesonar`, then `filesonar setup` again"
+            )
+            return False
+        else:
+            cmd = [sys.executable, "-m", "pip", "install", "faster-whisper>=1.1"]
+        print("  installing speech recognition (a few minutes) ...")
+        result = self.run(cmd, timeout=1800)
+        importlib.invalidate_caches()
+        if result.returncode != 0 or not WhisperTranscriber.installed():
+            detail = (result.stderr or result.stdout).strip().splitlines()[-1:]
+            self.warn(
+                f"could not install speech recognition ({' '.join(detail)[:120]}); "
+                f"try: {shlex.join(cmd)}"
+            )
+            return False
+        self.ok("speech recognition installed")
+        return True
+
     def tesseract(self) -> None:
         if tesseract_available():
             self.ok("Tesseract found")
@@ -278,6 +372,20 @@ class Setup:
                     text, "models", "caption_images", "true" if vision else "false"
                 )
                 write_private(path, text)
+            missing = [
+                self.home / name
+                for name in MEDIA_FOLDERS
+                if existing.media.enabled
+                and (self.home / name).is_dir()
+                and not any((self.home / name).is_relative_to(r) for r in existing.roots)
+            ]
+            if missing and self.ask.yes(
+                f"Also search {' and '.join(f'~/{m.name}' for m in missing)} "
+                "(audio and video can be found now)?"
+            ):
+                text = add_roots(text, missing)
+                write_private(path, text)
+                existing = load_config(path)
             for root in existing.roots:
                 self.ok(f"{root}" + ("" if root.is_dir() else "  (missing!)"))
             self.ok(f"config kept: {path} (edit it to change folders)")
@@ -661,7 +769,7 @@ class Uninstall(Setup):
             for p in [*sorted(data_dir.glob("index*.sqlite3*")), self.config_path]
             if p.is_file() and not p.is_symlink()
         ]
-        if not ours:
+        if not ours and not (data_dir / "models").is_dir():
             return
         purge = self.purge
         if purge is None:
@@ -675,6 +783,18 @@ class Uninstall(Setup):
         for p in ours:
             p.unlink()
         self.ok(f"deleted the index and settings ({len(ours)} files)")
+        # The speech model setup downloaded (Hugging Face cache layout).
+        models = data_dir / "models"
+        if models.is_dir() and not models.is_symlink():
+            import shutil
+
+            for entry in models.iterdir():
+                ours = entry.name.startswith("models--") or entry.name == ".locks"
+                if ours and entry.is_dir() and not entry.is_symlink():
+                    shutil.rmtree(entry)
+            with contextlib.suppress(OSError):
+                models.rmdir()
+            self.ok("deleted the speech model")
         for folder in (data_dir, self.config_path.parent):
             with contextlib.suppress(OSError):
                 folder.rmdir()  # only if now empty

@@ -11,8 +11,9 @@ account or server, and the people who write filesonar never receive any of your 
 
 ## What it does with it
 
-Everything is processed on your computer, by the AI models you run there (Ollama). The
-result — extracted text, descriptions of photos, and metadata — is stored in a private
+Everything is processed on your computer, by the AI models you run there (Ollama, and
+for audio and video an optional speech-recognition model). The result — extracted text,
+descriptions of photos and videos, transcripts of what is said, and metadata — is stored in a private
 index file in your own data folder (`~/.local/share/filesonar/` by default), readable
 only by your user account. You can delete it at any time.
 
@@ -22,6 +23,13 @@ filesonar does not:
 - include analytics, telemetry or crash reporting;
 - store GPS locations from photos;
 - index secrets such as SSH keys, password stores, browser profiles or `.env` files.
+
+## Speech recognition
+
+If you choose it during `filesonar setup`, a speech-recognition model is downloaded
+**once** from Hugging Face (`huggingface.co`, the usual home of open AI models) into
+filesonar's data folder. That download is the only time it is contacted: indexing only
+uses the copy on disk, and no recording, transcript or other data is ever sent there.
 
 ## Google Drive
 

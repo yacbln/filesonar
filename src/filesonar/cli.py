@@ -29,6 +29,15 @@ def _open(cfg: Config) -> tuple[Database, OllamaClient]:
     return Database(cfg.db_path), OllamaClient(cfg.models)
 
 
+def _transcriber(cfg: Config):
+    """Speech recognition for audio and video, if turned on (loaded only when used)."""
+    if not (cfg.media.enabled and cfg.media.transcribe):
+        return None
+    from .media import WhisperTranscriber
+
+    return WhisperTranscriber(cfg.media.speech_model, cfg.models_dir)
+
+
 def _drive_indexer(cfg: Config, db: Database, client: OllamaClient, progress=None):
     """A Drive indexer if Drive is enabled and signed in, else None (with a warning)."""
     if not cfg.drive.enabled:
@@ -41,7 +50,9 @@ def _drive_indexer(cfg: Config, db: Database, client: OllamaClient, progress=Non
     except NotSignedIn as exc:
         print(f"warning: Google Drive skipped: {exc}", file=sys.stderr)
         return None
-    return DriveIndexer(cfg, db, OllamaEmbedder(client), drive, OllamaCaptioner(client), progress)
+    return DriveIndexer(
+        cfg, db, OllamaEmbedder(client), drive, OllamaCaptioner(client), progress, _transcriber(cfg)
+    )
 
 
 def _print_errors(report) -> None:
@@ -116,6 +127,21 @@ def cmd_doctor(cfg: Config) -> int:
             f"slow; free GPU memory, then run: ollama stop {name}"
         )
     print(f"tesseract:   {'ok' if tesseract_available() else 'missing (no OCR)'}")
+    from . import media
+
+    if not cfg.media.enabled:
+        print("media:       disabled")
+    else:
+        ffmpeg = "ok" if media.tools_available() else "missing (audio and video by name only)"
+        print(f"ffmpeg:      {ffmpeg}")
+        if cfg.media.transcribe:
+            speech = media.WhisperTranscriber(cfg.media.speech_model, cfg.models_dir)
+            state = (
+                f"ok ({cfg.media.speech_model} model)"
+                if speech.ready()
+                else "not set up (run `filesonar setup`)"
+            )
+            print(f"speech:      {state}")
     if cfg.drive.enabled:
         from .drive import DriveError, load_token, token_path
 
@@ -151,7 +177,9 @@ def cmd_index(cfg: Config, args: argparse.Namespace) -> int:
         if args.rebuild:
             db.reset()
         progress = _progress_printer(args.verbose)
-        indexer = Indexer(cfg, db, OllamaEmbedder(client), OllamaCaptioner(client), progress)
+        indexer = Indexer(
+            cfg, db, OllamaEmbedder(client), OllamaCaptioner(client), progress, _transcriber(cfg)
+        )
         report = indexer.run()
         print(report.summary())
         _print_errors(report)
@@ -209,7 +237,9 @@ def cmd_watch(cfg: Config, args: argparse.Namespace) -> int:
     from .watcher import watch
 
     db, client = _open(cfg)
-    indexer = Indexer(cfg, db, OllamaEmbedder(client), OllamaCaptioner(client))
+    indexer = Indexer(
+        cfg, db, OllamaEmbedder(client), OllamaCaptioner(client), transcriber=_transcriber(cfg)
+    )
     drive = _drive_indexer(cfg, db, client)
     try:
         if not args.no_initial_scan:

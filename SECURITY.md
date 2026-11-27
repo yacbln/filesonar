@@ -23,6 +23,7 @@ In scope, for example:
   the index or in a tool result
 - the MCP server reading, revealing or changing anything beyond what is documented
 - file contents or queries being sent anywhere other than the configured model server
+  (the speech model is downloaded once from Hugging Face during setup; nothing is sent)
   (or, with Google Drive enabled, Google's Drive API)
 - the Google sign-in token leaking (logs, file permissions, other hosts), or `share_file`
   uploading anything other than the indexed file it was asked for, or outside its folder

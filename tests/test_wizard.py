@@ -3,6 +3,7 @@
 import stat
 import subprocess
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 
@@ -96,6 +97,32 @@ class FakeSystem:
         return [c for c in self.calls if c[: len(prefix)] == list(prefix)]
 
 
+class FakeSpeech:
+    """Stands in for faster-whisper: installed and model downloaded, as configured."""
+
+    is_installed = True
+    has_model = True
+    downloads: ClassVar[list] = []
+
+    @classmethod
+    def reset(cls, installed=True, model=True):
+        cls.is_installed, cls.has_model, cls.downloads = installed, model, []
+
+    def __init__(self, model, models_dir):
+        self.model, self.models_dir = model, models_dir
+
+    @classmethod
+    def installed(cls):
+        return cls.is_installed
+
+    def ready(self):
+        return self.is_installed and self.has_model
+
+    def download(self):
+        type(self).downloads.append((self.model, self.models_dir))
+        type(self).has_model = True
+
+
 class Answers:
     """Scripted answers to questions; fails the test on an unexpected question."""
 
@@ -119,6 +146,9 @@ def env(tmp_path, monkeypatch):
     monkeypatch.delenv("XDG_DATA_HOME", raising=False)
     monkeypatch.delenv("OPENCLAW", raising=False)
     monkeypatch.setattr(wizard, "tesseract_available", lambda: True)
+    monkeypatch.setattr(wizard.media, "tools_available", lambda: True)
+    FakeSpeech.reset()
+    monkeypatch.setattr(wizard, "WhisperTranscriber", FakeSpeech)
     system = FakeSystem(home / ".openclaw" / "workspace")
     tools = {"openclaw": "openclaw", "claude": "claude", "systemctl": "systemctl"}
 
@@ -498,3 +528,78 @@ def test_headless_server_gets_the_linger_hint(env, monkeypatch, capsys):
     setup.run = with_loginctl
     setup.main()
     assert "enable-linger" not in capsys.readouterr().out
+
+
+# -- audio and video ------------------------------------------------------------------
+
+
+def test_speech_recognition_is_offered_and_its_model_downloaded(env, capsys):
+    FakeSpeech.reset(installed=True, model=False)
+    assert env(Options(assume_yes=True)).main() == 0
+    assert FakeSpeech.downloads == [("base", env.home / ".local/share/filesonar/models")]
+    assert "speech recognition ready" in capsys.readouterr().out
+
+
+def test_speech_recognition_is_installed_with_pipx_into_filesonars_own_environment(
+    env, monkeypatch, capsys
+):
+    FakeSpeech.reset(installed=False, model=False)
+    monkeypatch.setattr(wizard.sys, "prefix", "/home/me/.local/share/pipx/venvs/filesonar")
+    real = env.system.__call__
+
+    def run(cmd, timeout=120):
+        if cmd[:2] == ["pipx", "inject"]:
+            FakeSpeech.is_installed = True
+            return subprocess.CompletedProcess(cmd, 0, "injected", "")
+        return real(cmd, timeout)
+
+    setup = env(Options(assume_yes=True), which={"pipx": "pipx", "systemctl": "systemctl"})
+    setup.run = run
+    assert setup.main() == 0
+    assert FakeSpeech.downloads and "speech recognition installed" in capsys.readouterr().out
+
+
+def test_failed_install_explains_what_to_run(env, capsys):
+    FakeSpeech.reset(installed=False, model=False)
+    assert env(Options(assume_yes=True)).main() == 0  # pip "fails" in the fake system
+    out = capsys.readouterr().out
+    assert "could not install speech recognition" in out and "faster-whisper" in out
+    assert not FakeSpeech.downloads
+
+
+def test_saying_no_to_speech_recognition(env, capsys):
+    FakeSpeech.reset(installed=False, model=False)
+    assert env(Options(assume_yes=True, speech=False)).main() == 0
+    assert "skipped; recordings are found by what they show" in capsys.readouterr().out
+
+
+def test_missing_ffmpeg_is_a_warning_with_the_install_command(env, monkeypatch, capsys):
+    monkeypatch.setattr(wizard.media, "tools_available", lambda: False)
+    which = {"systemctl": "systemctl", "dnf": "/usr/bin/dnf"}
+    assert env(Options(assume_yes=True), which=which).main() == 0
+    out = capsys.readouterr().out
+    assert "ffmpeg is missing" in out and "sudo dnf install ffmpeg" in out
+
+
+def test_existing_setup_is_offered_videos_and_music_folders(env, capsys):
+    env.config.parent.mkdir(parents=True)
+    env.config.write_text(render_config([env.home / "Documents"]))
+    (env.home / "Videos").mkdir()
+    (env.home / "Music").mkdir()
+    answers = Answers("y")  # also search ~/Videos and ~/Music?
+    quiet = Options(service=False, claude_code=False, index_now=False)
+    assert env(quiet, answers=answers).main() == 0
+    roots = load_config(env.config).roots
+    assert roots == (env.home / "Documents", env.home / "Videos", env.home / "Music")
+    assert env(quiet, answers=Answers()).main() == 0  # not asked again
+
+
+def test_uninstall_deletes_the_speech_model_with_the_data(env, monkeypatch):
+    env(Options(assume_yes=True)).main()
+    models = load_config(env.config).models_dir
+    (models / "models--Systran--faster-whisper-base").mkdir(parents=True)
+    (models / "models--Systran--faster-whisper-base" / "model.bin").write_bytes(b"x")
+    (models / "my-notes.txt").write_text("not filesonar's")
+    assert env(Options(), cls=Uninstall, purge=True).main() == 0
+    assert not (models / "models--Systran--faster-whisper-base").exists()
+    assert (models / "my-notes.txt").exists()  # only what filesonar downloaded

@@ -13,18 +13,24 @@ from functools import lru_cache
 from pathlib import Path
 
 from . import extract as extract_module
+from . import media
 from .chunking import chunk_text
 from .config import Config
 from .db import Database
 from .extract import (
+    MEDIA_KINDS,
     Extraction,
     ExtractionError,
     FileTooLarge,
     Segment,
     extract,
+    extract_media,
+    hash_open_file,
     kind_for,
+    open_regular_file,
     read_regular_file,
 )
+from .media import Transcriber
 from .models import Captioner, Embedder
 from .pathrules import is_hidden, within
 
@@ -102,11 +108,13 @@ class Indexer:
         embedder: Embedder,
         captioner: Captioner | None = None,
         progress: Callable[[str], None] | None = None,
+        transcriber: Transcriber | None = None,
     ):
         self.cfg = cfg
         self.db = db
         self.embedder = embedder
         self.captioner = captioner if cfg.models.caption_images else None
+        self.transcriber = transcriber if cfg.media.transcribe else None
         self.progress = progress or (lambda _msg: None)
         self._vector_ready = False
 
@@ -125,7 +133,8 @@ class Indexer:
             return False
         if not self.cfg.index.include_hidden and is_hidden(path, root):
             return False
-        if kind_for(path) is None:
+        kind = kind_for(path)
+        if kind is None or (kind in MEDIA_KINDS and not self.cfg.media.enabled):
             return False
         if self._in_dependency_dir(path, root):
             return False
@@ -182,21 +191,33 @@ class Indexer:
         return self.cfg.index.ocr and extract_module.tesseract_available()
 
     def _needs_ocr(self, row) -> bool:
-        """Read while OCR was missing (Tesseract installed later, or OCR turned on)."""
-        return (
-            row is not None
-            and row["kind"] in ("image", "pdf")
-            and not row["ocr"]
-            and self._ocr_now()
+        """Read while a reader it needs was missing: OCR for scans (Tesseract installed
+        later), ffmpeg or speech recognition for recordings."""
+        if row is None or row["ocr"]:
+            return False
+        if row["kind"] in ("image", "pdf"):
+            return self._ocr_now()
+        if row["kind"] in MEDIA_KINDS:
+            return self._media_ready()
+        return False
+
+    def _media_ready(self) -> bool:
+        """Everything needed to read a recording fully is installed."""
+        if not media.tools_available():
+            return False
+        return not self.cfg.media.transcribe or (
+            self.transcriber is not None and self.transcriber.available()
         )
 
     def _needs_reread(self, row) -> bool:
         return self._needs_caption(row) or self._needs_ocr(row)
 
     def _needs_caption(self, row) -> bool:
+        if row is not None and row["kind"] == "video" and not media.tools_available():
+            return False  # frames cannot be read yet; _needs_ocr covers ffmpeg arriving
         return (
             row is not None
-            and row["kind"] == "image"
+            and row["kind"] in ("image", "video")
             and not row["captioned"]
             and self.captioner is not None
             and self.captioner.available()
@@ -282,7 +303,10 @@ class Indexer:
     def index_file(self, path: Path, report: IndexReport) -> None:
         report.scanned += 1
         key = str(path)
-        max_bytes = int(self.cfg.index.max_file_size_mb * 1024 * 1024)
+        kind = kind_for(path)
+        is_media = kind in MEDIA_KINDS
+        mb = self.cfg.media.max_size_mb if is_media else self.cfg.index.max_file_size_mb
+        max_bytes = int(mb * 1024 * 1024)
         try:
             st = os.lstat(path)
         except OSError as exc:
@@ -303,23 +327,40 @@ class Indexer:
             report.unchanged += 1
             return
 
-        # From here on only these bytes are used: hashed, parsed and indexed.
+        # From here on only this open file is used: hashed, parsed and indexed.
+        # Documents are read into memory once; recordings (which can be gigabytes)
+        # stay on disk and are read in pieces through the open descriptor.
+        fd = None
         try:
-            data, st = read_regular_file(path, max_bytes)
+            if is_media:
+                fd, st = open_regular_file(path, max_bytes)
+                data = None
+                sha, md5 = hash_open_file(fd)
+            else:
+                data, st = read_regular_file(path, max_bytes)
+                sha = hashlib.sha256(data).hexdigest()
+                # Drive reports MD5 checksums; storing ours lets the same file be
+                # recognised in both places.
+                md5 = hashlib.md5(data, usedforsecurity=False).hexdigest()
         except FileTooLarge:
             report.skipped += 1
             return
         except (OSError, ExtractionError) as exc:
+            if fd is not None:
+                os.close(fd)
             _fail(report, key, str(exc))
             return
+        try:
+            self._index_contents(path, key, kind, row, st, sha, md5, data, fd, report)
+        finally:
+            if fd is not None:
+                os.close(fd)
+
+    def _index_contents(self, path, key, kind, row, st, sha, md5, data, fd, report) -> None:
         # The parent folders may have changed since the walk; check where we really are.
         if within(Path(os.path.realpath(path)), self.cfg.roots) is None:
             report.skipped += 1
             return
-        sha = hashlib.sha256(data).hexdigest()
-        # Drive reports MD5 checksums; storing ours lets the same file be recognised
-        # in both places.
-        md5 = hashlib.md5(data, usedforsecurity=False).hexdigest()
 
         if row is not None and row["sha256"] == sha and not self._needs_reread(row):
             self.db.touch_file(row["id"], key, path.name, st.st_mtime)
@@ -342,12 +383,23 @@ class Indexer:
         if self._copy_from_twin(path, key, sha, md5, st, row, report):
             return
         status, error = "ok", None
-        ocr = self._ocr_now()
         try:
-            extraction = extract(path, self.cfg.index, self.captioner, data=data)
+            if fd is not None:
+                # Recordings: complete once ffmpeg and speech recognition are there;
+                # until then they are findable by name and read again later.
+                complete = self._media_ready()
+                if media.tools_available():
+                    extraction = extract_media(
+                        path, fd, self.cfg.media, self.captioner, self.transcriber
+                    )
+                else:
+                    extraction = Extraction(kind=kind or "video")
+            else:
+                complete = self._ocr_now()
+                extraction = extract(path, self.cfg.index, self.captioner, data=data)
         except ExtractionError as exc:
             status, error = "error", str(exc)[:500]
-            extraction = Extraction(kind=kind_for(path) or "text")
+            extraction = Extraction(kind=kind or "text")
             _fail(report, key, error)
         if status == "ok" and not any(
             s.text.strip() for s in extraction.segments if s.source != "metadata"
@@ -374,7 +426,7 @@ class Indexer:
             chunks=chunks,
             vectors=vectors,
             md5=md5,
-            ocr=ocr,
+            ocr=complete,
         )
         self.progress(f"indexed {key} ({time.monotonic() - started:.1f}s)")
         if status != "error":

@@ -265,3 +265,20 @@ def test_text_byte_order_mark_is_dropped(tmp_path):
     path.write_bytes(b"\xef\xbb\xbfcompany: Tovala")
     text = extract(path, IndexConfig()).segments[0].text
     assert text.startswith("company")
+
+
+@pytest.mark.parametrize(
+    ("make", "model", "expected"),
+    [
+        ("motorola", "motorola edge 2024", "motorola edge 2024"),
+        ("HUAWEI", "HUAWEI VNS-L31", "HUAWEI VNS-L31"),
+        ("Canon", "EOS R6", "Canon EOS R6"),
+        ("Apple\x00", "iPhone 15", "Apple iPhone 15"),
+        (None, "Pixel 7", "Pixel 7"),
+        (None, None, ""),
+    ],
+)
+def test_camera_name(make, model, expected):
+    from filesonar.extract import camera_name
+
+    assert camera_name(make, model) == expected

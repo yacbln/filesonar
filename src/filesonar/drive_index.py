@@ -18,7 +18,7 @@ from pathlib import Path, PurePosixPath
 from .config import ALWAYS_EXCLUDED, DEFAULT_EXCLUDE, Config
 from .db import Database
 from .drive import FOLDER_MIME, DriveClient, DriveError
-from .extract import Extraction, ExtractionError, Segment, extract, kind_for
+from .extract import Extraction, ExtractionError, Segment, camera_name, extract, kind_for
 from .indexer import Indexer, IndexReport, _fail
 from .models import Captioner, Embedder
 from .pathrules import matches_any
@@ -377,7 +377,7 @@ def _add_drive_photo_details(extraction: Extraction, file: dict) -> None:
     taken = photo.get("time")
     if isinstance(taken, str) and len(taken) >= 10:
         parts.append(f"taken: {taken[:10].replace(':', '-')}")
-    camera = " ".join(str(photo[k]).strip() for k in ("cameraMake", "cameraModel") if photo.get(k))
+    camera = camera_name(photo.get("cameraMake"), photo.get("cameraModel"))
     if camera:
         parts.append(f"camera: {camera}")
     # Previews sometimes keep the photo's own EXIF; do not repeat what is already there.

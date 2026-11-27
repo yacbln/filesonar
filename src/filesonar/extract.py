@@ -202,6 +202,15 @@ _EXIF_MAKE = ExifTags.Base.Make
 _EXIF_MODEL = ExifTags.Base.Model
 
 
+def camera_name(make: object, model: object) -> str:
+    """ "motorola" + "motorola edge 2024" -> "motorola edge 2024" (many phones repeat it)."""
+    make_s = str(make or "").strip("\x00 ")
+    model_s = str(model or "").strip("\x00 ")
+    if make_s and model_s.lower().startswith(make_s.lower()):
+        return model_s
+    return " ".join(x for x in (make_s, model_s) if x)
+
+
 def _exif_summary(image: Image.Image) -> str | None:
     try:
         exif = image.getexif()
@@ -215,9 +224,7 @@ def _exif_summary(image: Image.Image) -> str | None:
             when = datetime.strptime(taken.strip(), "%Y:%m:%d %H:%M:%S").date().isoformat()
         except ValueError:
             when = None
-    camera = " ".join(
-        str(v).strip("\x00 ") for v in (exif.get(_EXIF_MAKE), exif.get(_EXIF_MODEL)) if v
-    )
+    camera = camera_name(exif.get(_EXIF_MAKE), exif.get(_EXIF_MODEL))
     # GPS coordinates are deliberately not stored: they reveal where people live.
     return _join_details(taken=when, camera=camera or None)
 

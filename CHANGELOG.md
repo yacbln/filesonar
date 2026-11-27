@@ -6,34 +6,15 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
-- `filesonar drive login` without `--client-secret` signs in again with the OAuth
-  client saved from the last sign-in, so the downloaded JSON is only needed once.
-
-- If Ollama hangs, search falls back to keywords after 15 seconds instead of waiting
-  for the full model timeout (120 s by default).
-
-- `share_file` no longer uploads a second copy when asked again before the next Drive
-  sync: it checks its Drive folder for the same checksum first.
-
-- Better ranking when a few rare words identify a file: the reciprocal rank fusion
-  constant goes from 60 to 5. On a real 16,000-file index, top-3 recall for such
-  queries rose from 64-76% to 86-95% (Google Drive: 48-61% to 86-100%), with no loss
-  for meaning-only queries. `scripts/eval_search.py` measures this on your own index.
-- Office lock files (`~$report.docx`, `.~lock.report.docx#`) are skipped by default.
-- Byte-order marks at the start of text files and Google Docs exports are removed.
-
-- Photo descriptions no longer echo the prompt ("not a photo, screenshot, receipt or
-  diagram") or state what an image lacks ("there is no visible text or brands"); such
-  sentences made unrelated images match searches for those words.
-- `filesonar init` creates the config folder with private (0700) permissions.
-
-- `filesonar doctor` warns when Ollama has a model only partly in GPU memory, which
-  makes photo descriptions several times slower.
-
 ## [0.1.0] - 2026-11-27
 
 First release.
 
+- `filesonar setup` takes a fresh install to a working one: checks Ollama and downloads
+  the models, checks Tesseract, writes the config with the folders you choose, connects
+  Google Drive if you want, registers with OpenClaw (and installs its skill) and Claude
+  Code, installs a systemd user service and starts the first index. Safe to run again;
+  it only changes what is missing.
 - Index PDFs (text per page, OCR for scanned pages), Word documents, images (vision-model
   captions, OCR, EXIF date and camera) and text files.
 - Hybrid search: SQLite FTS5 keywords plus sqlite-vec embeddings, merged with
@@ -57,7 +38,7 @@ First release.
 - Robust against real-world files: runaway captions are capped and cleaned, OCR has a
   per-image time limit, truncated images and unusual PNG transparency are handled.
 - Files are read once without following symlinks, closing a check-then-read race.
-- Google Drive support (opt-in, new): `filesonar drive login` signs in with your own OAuth
+- Google Drive support (opt-in): `filesonar drive login` signs in with your own OAuth
   client; Drive files, Google Docs, Sheets and Slides are indexed locally and kept up to
   date through the Drive change feed (`filesonar watch` polls every `poll_minutes`).
   Files that also exist on this computer are matched by MD5 and never downloaded;
@@ -66,3 +47,7 @@ First release.
   / `source` limits results to `local` or `drive`.
 - `share_file` MCP tool: a private Drive link for a laptop file, uploading it to a
   `filesonar` folder only if Drive does not already have it.
+- Signing in to Drive again needs no client_secret file: the saved OAuth client is reused.
+- `filesonar doctor` warns when Ollama has a model only partly in GPU memory.
+- `scripts/eval_search.py` measures search quality on your own index; the fusion
+  constant (5) was chosen with it on a real 16,000-file index.

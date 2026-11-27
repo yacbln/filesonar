@@ -106,6 +106,7 @@ def test_doctor_reports_missing_pieces(config_file, monkeypatch, capsys):
     monkeypatch.setattr(
         cli.OllamaClient, "installed_models", lambda self: {"nomic-embed-text", "qwen2.5vl:7b"}
     )
+    monkeypatch.setattr(cli.OllamaClient, "loaded_models", lambda self: {})
     assert cli.main(["-c", str(config_file), "doctor"]) == 0
     out = capsys.readouterr().out
     assert "nomic-embed-text ok" in out and "qwen2.5vl:7b ok" in out

@@ -8,7 +8,9 @@ one folder to index is listed.
 from __future__ import annotations
 
 import ipaddress
+import json
 import os
+import re
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -396,3 +398,74 @@ include_shared = false  # also index files shared with you
 share_folder = "filesonar"
 poll_minutes = 5
 """
+
+
+_EXAMPLE_ROOTS = """roots = [
+  "~/Documents",
+  "~/Pictures",
+  "~/Downloads",
+]"""
+
+
+def _toml_string(value: str) -> str:
+    # JSON string escapes are a subset of TOML basic-string escapes.
+    return json.dumps(value)
+
+
+def render_config(roots: list[Path], *, caption_images: bool = True) -> str:
+    """The example config with these folders (shown as ~/... when under home)."""
+    home = Path.home()
+    shown = []
+    for root in roots:
+        try:
+            shown.append("~/" + root.relative_to(home).as_posix())
+        except ValueError:
+            shown.append(root.as_posix())
+    lines = "".join(f"  {_toml_string(s)},\n" for s in shown)
+    text = EXAMPLE_CONFIG.replace(_EXAMPLE_ROOTS, f"roots = [\n{lines}]", 1)
+    if not caption_images:
+        text = set_toml_value(text, "models", "caption_images", "false")
+    return text
+
+
+def set_toml_value(text: str, section: str, key: str, literal: str) -> str:
+    """Set one key in one [section] of a TOML file, keeping comments and layout.
+
+    ``literal`` is the TOML value as written (``true``, ``"name"``, ``5``)."""
+    lines = text.splitlines(keepends=True)
+    header = re.compile(r"^\s*\[\s*" + re.escape(section) + r"\s*\]\s*(#.*)?$")
+    assignment = re.compile(r"^(\s*" + re.escape(key) + r"\s*=\s*)([^#\n]*?)(\s*#.*)?(\n?)$")
+    start = next((i for i, line in enumerate(lines) if header.match(line)), None)
+    if start is None:
+        if text and not text.endswith("\n"):
+            text += "\n"
+        new = f"{text}\n[{section}]\n{key} = {literal}\n"
+    else:
+        end = next(
+            (i for i in range(start + 1, len(lines)) if re.match(r"^\s*\[", lines[i])),
+            len(lines),
+        )
+        for i in range(start + 1, end):
+            found = assignment.match(lines[i])
+            if found:
+                comment = found.group(3) or ""
+                lines[i] = f"{found.group(1)}{literal}{comment}{found.group(4)}"
+                break
+        else:
+            lines.insert(start + 1, f"{key} = {literal}\n")
+        new = "".join(lines)
+    tomllib.loads(new)  # never write a file we cannot read back
+    return new
+
+
+def write_private(path: Path, text: str) -> None:
+    """Write a config file only its owner can read, in a private folder."""
+    new_dir = not path.parent.exists()
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    if new_dir:
+        os.chmod(path.parent, 0o700)  # mkdir's mode is reduced by the umask
+    tmp = path.with_name(f".{path.name}.tmp")
+    fd = os.open(tmp, os.O_CREAT | os.O_WRONLY | os.O_TRUNC | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "w") as fh:
+        fh.write(text)
+    os.replace(tmp, path)

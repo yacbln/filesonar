@@ -1,7 +1,7 @@
 # filesonar
 
 [![CI](https://github.com/yacbln/filesonar/actions/workflows/ci.yml/badge.svg)](https://github.com/yacbln/filesonar/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/yacbln/filesonar/blob/main/LICENSE)
 
 **Search your files by what is inside them — privately, on your own machine — and let your AI agent do it for you.**
 
@@ -33,38 +33,37 @@ Optionally, it can also index your [Google Drive](#google-drive) — the files a
 
 With [Google Drive](#google-drive) enabled, the same goes for files in your Drive, plus Google Docs, Sheets and Slides. Coming next: audio and video. See the [roadmap](#roadmap).
 
-## Requirements
+## Install
 
-- Linux (macOS will probably work but is not tested yet)
-- Python 3.11 or newer
-- [Ollama](https://ollama.com/download) with an embedding model, and optionally a vision model:
-  ```bash
-  ollama pull nomic-embed-text   # required, 274 MB
-  ollama pull qwen2.5vl:7b       # optional, ~6 GB, describes photos
-  ```
-- [Tesseract](https://github.com/tesseract-ocr/tesseract) for OCR (optional but recommended):
-  ```bash
-  sudo apt install tesseract-ocr          # add tesseract-ocr-fra, -ara, … for other languages
-  ```
+You need Linux, Python 3.11 or newer, and [Ollama](https://ollama.com/download), which runs the models on your computer. Then:
+
+```bash
+pipx install filesonar
+filesonar setup
+```
+
+`setup` asks a few questions and does the rest. Each step checks first and only changes what is missing, so it is safe to run again — and running it after `pipx upgrade filesonar` is how an upgrade takes effect. It:
+
+1. checks that Ollama runs, and downloads the text model `nomic-embed-text` (274 MB). It offers the vision model `qwen2.5vl:7b` that describes photos (about 6 GB, best with a GPU);
+2. checks for [Tesseract](https://github.com/tesseract-ocr/tesseract), which reads text in scans and screenshots, and prints the install command if it is missing (`sudo apt install tesseract-ocr`; add `tesseract-ocr-fra`, `-ara`, … for other languages). Setup never runs `sudo` itself;
+3. writes `~/.config/filesonar/config.toml` with the folders you choose (by default Documents, Pictures, Downloads and Desktop, if they exist);
+4. optionally connects [Google Drive](#google-drive);
+5. registers filesonar with OpenClaw and installs its skill, and with Claude Code if you have it;
+6. installs a systemd user service that keeps the index up to date;
+7. starts the first index.
+
+For a setup without questions: `filesonar setup --yes`, optionally with `--folder ~/Papers` (repeatable), `--no-vision`, `--no-service`. See `filesonar setup --help`.
 
 A GPU makes photo descriptions fast. Text, PDFs and OCR are fine on a CPU.
 
-## Install
-
-```bash
-pipx install git+https://github.com/yacbln/filesonar
-```
-
-or, from a clone, `pip install .` inside a virtual environment.
+To install the latest code from GitHub instead: `pipx install git+https://github.com/yacbln/filesonar`.
 
 ## Quick start
 
 ```bash
-filesonar init          # writes ~/.config/filesonar/config.toml
-$EDITOR ~/.config/filesonar/config.toml   # list the folders you want indexed
-filesonar doctor        # checks Ollama, the models and Tesseract
-filesonar index         # first pass; later runs only look at what changed
 filesonar search "lease agreement for the apartment"
+filesonar status        # how much is indexed
+filesonar doctor        # checks Ollama, the models, Tesseract and Drive
 ```
 
 Useful search options: `--kind pdf|document|image|text`, `--folder ~/Documents/taxes`, `--after 2024-01-01`, `--before 2024-12-31`, `--source local|drive`, `--json`.
@@ -73,13 +72,10 @@ Useful search options: `--kind pdf|document|image|text`, `--folder ~/Documents/t
 
 `filesonar watch` re-indexes files as soon as they are added, edited, moved or deleted (it waits for a few quiet seconds, so copying 500 photos results in one pass, not 500). It also does a full scan once a day as a safety net. Moving or renaming a file is recognised by its content and costs nothing.
 
-To run it in the background with systemd:
+`filesonar setup` runs it in the background as the systemd user service `filesonar-watch`:
 
 ```bash
-mkdir -p ~/.config/systemd/user
-cp contrib/filesonar-watch.service ~/.config/systemd/user/
-systemctl --user daemon-reload
-systemctl --user enable --now filesonar-watch
+systemctl --user status filesonar-watch
 journalctl --user -u filesonar-watch -f     # see what it is doing
 ```
 
@@ -104,9 +100,7 @@ openclaw mcp add filesonar --command filesonar --arg serve
 openclaw mcp probe filesonar
 ```
 
-If your gateway runs elsewhere or hot reload is off, reload or restart it afterwards. A skill that teaches OpenClaw when to use these tools lives in [`skill/`](skill/SKILL.md).
-
-`contrib/openclaw-setup.sh` does all of this in one go: it registers the server and installs the skill. With `--read-only-approvals` it also lets read-only shell commands (`ls`, `cat`, `head`, `grep`, …) run without an approval prompt, while anything that can delete, move, write or download keeps asking.
+`filesonar setup` does this for you, and also installs a [skill](https://github.com/yacbln/filesonar/blob/main/src/filesonar/skill/SKILL.md) that teaches OpenClaw when to use these tools (into `~/.openclaw/workspace/skills/filesonar/`). If your gateway runs elsewhere or hot reload is off, reload or restart it afterwards. If `openclaw` on your `PATH` is not the one your gateway runs, point setup at the right one: `filesonar setup --openclaw /path/to/openclaw`.
 
 ### Claude Code
 
@@ -128,8 +122,6 @@ Add `"--config", "/path/to/config.toml"` before `"serve"` if your config is not 
 
 ## Google Drive
 
-> Google Drive support is new. It is covered by an extensive test suite against a simulated Drive API; please [report](https://github.com/yacbln/filesonar/issues) anything that behaves differently with your real Drive.
-
 filesonar can index the files in your Google Drive and keep up with changes, so "find the lease" also finds the copy you only have in Drive. File contents are downloaded to your computer and processed there by the same local models; only Drive's own API is contacted. Photos are described from Drive's preview image (no need to download a 6 MB original), and files that are already on your computer — say, photos synced to Drive — are recognised by their checksum and never downloaded at all.
 
 After the first sync, filesonar uses Drive's [change feed](https://developers.google.com/drive/api/guides/manage-changes): `filesonar watch` asks "what changed?" every few minutes, which is one cheap request when nothing did. The Drive API is free for this kind of personal use.
@@ -146,10 +138,10 @@ filesonar does not ship a shared Google app; you create your own, so your access
 6. Sign in and turn Drive on:
 
    ```bash
-   filesonar drive login --client-secret ~/Downloads/client_secret_XXXX.json
+   filesonar setup --drive-client-secret ~/Downloads/client_secret_XXXX.json
    ```
 
-   Your browser opens Google's consent page. Because the app is yours and unverified, Google shows *"Google hasn't verified this app"*: choose **Advanced → Go to filesonar**. Allow both permissions (read your Drive, and create files filesonar makes). Then set `enabled = true` under `[drive]` in your config and run `filesonar index`. You can delete the downloaded JSON afterwards; filesonar keeps what it needs in its own private file, and to sign in again later (for example after publishing the app) plain `filesonar drive login` is enough.
+   Your browser opens Google's consent page. Because the app is yours and unverified, Google shows *"Google hasn't verified this app"*: choose **Advanced → Go to filesonar**. Allow both permissions (read your Drive, and create files filesonar makes). Setup then turns Drive on in your config, and the background service indexes it. (By hand: `filesonar drive login --client-secret FILE`, set `enabled = true` under `[drive]`, run `filesonar index`.) You can delete the downloaded JSON afterwards; filesonar keeps what it needs in its own private file, and to sign in again later (for example after publishing the app) plain `filesonar drive login` is enough.
 
 The sign-in is saved to `~/.local/share/filesonar/drive-token.json` (permissions `0600`). `filesonar drive logout` revokes it and removes Drive files from the index.
 
@@ -234,7 +226,7 @@ filesonar reads your personal files, so it is built to be boring and predictable
 - **The index is private.** It is a single SQLite file created with `0600` permissions inside a `0700` folder. Delete it at any time; it can be rebuilt from your files.
 - **Defensive parsing.** Images that would decode to more than ~90 megapixels, password-protected PDFs, oversized files and binary files with text extensions are skipped rather than processed.
 
-Found a problem? Please see [SECURITY.md](SECURITY.md). The full privacy policy is in [PRIVACY.md](PRIVACY.md).
+Found a problem? Please see [SECURITY.md](https://github.com/yacbln/filesonar/blob/main/SECURITY.md). The full privacy policy is in [PRIVACY.md](https://github.com/yacbln/filesonar/blob/main/PRIVACY.md).
 
 ## How it works
 
@@ -283,7 +275,7 @@ Ideas and pull requests are welcome.
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). The short version:
+See [CONTRIBUTING.md](https://github.com/yacbln/filesonar/blob/main/CONTRIBUTING.md). The short version:
 
 ```bash
 python -m venv .venv && . .venv/bin/activate
@@ -295,4 +287,4 @@ ruff check . && ruff format --check .
 
 ## License
 
-[MIT](LICENSE)
+[MIT](https://github.com/yacbln/filesonar/blob/main/LICENSE)

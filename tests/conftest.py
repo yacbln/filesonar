@@ -7,6 +7,7 @@ import shutil
 from collections.abc import Sequence
 from pathlib import Path
 
+import httpx
 import pytest
 
 from filesonar.config import config_from_dict
@@ -15,6 +16,27 @@ from filesonar.indexer import Indexer
 from filesonar.models import ModelError
 
 DIM = 128
+
+
+@pytest.fixture(autouse=True)
+def _no_real_servers(request, monkeypatch):
+    """Tests talk to fakes only. A request to a real server (the Ollama on the developer's
+    machine, Google) would make results depend on that machine, or leak a test request
+    out. Local test servers on other ports (the OAuth redirect) stay reachable; tests
+    marked `ollama` use the real model server on purpose."""
+    if request.node.get_closest_marker("ollama"):
+        return
+    real = httpx.HTTPTransport.handle_request
+
+    def guarded(self, req):
+        host, port = req.url.host, req.url.port
+        if host not in ("127.0.0.1", "localhost", "::1") or port == 11434:
+            raise httpx.ConnectError(f"tests must not reach a real server: {req.url}")
+        return real(self, req)
+
+    monkeypatch.setattr(httpx.HTTPTransport, "handle_request", guarded)
+
+
 needs_tesseract = pytest.mark.skipif(
     shutil.which("tesseract") is None, reason="tesseract is not installed"
 )

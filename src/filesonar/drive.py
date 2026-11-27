@@ -508,3 +508,28 @@ def _is_rate_limited(resp: httpx.Response) -> bool:
 
 def _quote(file_id: str) -> str:
     return urllib.parse.quote(file_id, safe="")
+
+
+def sign_in(data_dir: Path, client_secret_file: Path | None = None, *, open_browser=True) -> Token:
+    """Sign in and save the token. Without a client_secret file, reuse the OAuth client
+    saved with the last sign-in (people are told they may delete the downloaded file)."""
+    path = token_path(data_dir)
+    if client_secret_file is not None:
+        client_id, client_secret = read_client_secret(client_secret_file)
+    else:
+        try:
+            saved = load_token(path)
+        except NotSignedIn:
+            raise DriveError(
+                "the first sign-in needs --client-secret, the client_secret_*.json "
+                "downloaded from Google Cloud Console"
+            ) from None
+        client_id, client_secret = saved.client_id, saved.client_secret
+    token = login(client_id, client_secret, open_browser=open_browser)
+    client = DriveClient(token)
+    try:
+        token.account = client.account()
+    finally:
+        client.close()
+    save_token(path, token)
+    return token

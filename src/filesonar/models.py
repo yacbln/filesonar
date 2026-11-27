@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import base64
+import json
 import logging
 import re
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Protocol
 
 import httpx
@@ -128,6 +129,40 @@ class OllamaClient:
             return set()
         # "nomic-embed-text" and "nomic-embed-text:latest" refer to the same model.
         return names | {n.removesuffix(":latest") for n in names}
+
+    def version(self) -> str | None:
+        """Ollama's version, or None if it cannot be reached."""
+        try:
+            resp = self.http.get("/api/version", timeout=5.0)
+            resp.raise_for_status()
+            return str(resp.json().get("version") or "unknown")
+        except (httpx.HTTPError, ValueError, AttributeError):
+            return None
+
+    def pull(self, name: str, progress: Callable[[str, int, int], None] | None = None) -> None:
+        """Download a model, reporting (status, completed bytes, total bytes)."""
+        try:
+            with self.http.stream(
+                "POST", "/api/pull", json={"model": name, "stream": True}, timeout=None
+            ) as resp:
+                if resp.status_code != 200:
+                    raise ModelError(f"ollama pull {name} failed: HTTP {resp.status_code}")
+                for line in resp.iter_lines():
+                    if not line.strip():
+                        continue
+                    event = json.loads(line)
+                    if event.get("error"):
+                        raise ModelError(f"ollama pull {name} failed: {event['error']}")
+                    if progress is not None:
+                        progress(
+                            str(event.get("status", "")),
+                            int(event.get("completed") or 0),
+                            int(event.get("total") or 0),
+                        )
+        except httpx.HTTPError as exc:
+            raise ModelError(f"ollama pull {name} failed: {exc}") from exc
+        except ValueError as exc:
+            raise ModelError(f"ollama pull {name}: unexpected reply") from exc
 
     def loaded_models(self) -> dict[str, tuple[int, int]]:
         """Models Ollama has in memory: name -> (bytes in GPU memory, total bytes)."""

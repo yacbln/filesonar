@@ -199,3 +199,9 @@ def test_queries_use_a_short_timeout_documents_the_configured_one():
     short = OllamaEmbedder(client_with(handler, timeout_seconds=5))
     short.embed_query("q")
     assert timeouts[-1] == 5  # never longer than the configured limit
+
+
+def test_tests_never_reach_the_real_ollama():
+    """The suite must not depend on (or disturb) an Ollama running on this machine."""
+    assert OllamaClient(ModelConfig()).version() is None
+    assert OllamaClient(ModelConfig()).loaded_models() == {}

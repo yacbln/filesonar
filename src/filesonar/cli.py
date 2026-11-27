@@ -6,12 +6,18 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import os
 import sys
 from pathlib import Path
 
 from . import __version__
-from .config import EXAMPLE_CONFIG, Config, ConfigError, default_config_path, load_config
+from .config import (
+    EXAMPLE_CONFIG,
+    Config,
+    ConfigError,
+    default_config_path,
+    load_config,
+    write_private,
+)
 from .db import Database
 from .extract import tesseract_available
 from .indexer import Indexer
@@ -50,15 +56,30 @@ def cmd_init(args: argparse.Namespace) -> int:
     if path.exists() and not args.force:
         print(f"{path} already exists (use --force to overwrite)", file=sys.stderr)
         return 1
-    new_dir = not path.parent.exists()
-    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    if new_dir:
-        os.chmod(path.parent, 0o700)  # mkdir's mode is reduced by the umask
-    fd = os.open(path, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "w") as fh:
-        fh.write(EXAMPLE_CONFIG)
+    write_private(path, EXAMPLE_CONFIG)
     print(f"wrote {path}\nedit the folder list, then run: filesonar index")
     return 0
+
+
+def cmd_setup(args: argparse.Namespace) -> int:
+    from .wizard import Options, Setup
+
+    opts = Options(
+        config_path=args.config,
+        assume_yes=args.yes,
+        folders=args.folders,
+        vision=args.vision,
+        drive_client_secret=args.drive_client_secret,
+        openclaw=args.openclaw,
+        claude_code=False if args.no_claude_code else None,
+        service=False if args.no_service else None,
+        index_now=False if args.no_index else None,
+    )
+    try:
+        return Setup(opts).main()
+    except KeyboardInterrupt:
+        print("\nsetup stopped; run `filesonar setup` again to continue")
+        return 130
 
 
 def cmd_doctor(cfg: Config) -> int:
@@ -233,37 +254,13 @@ def cmd_drive(cfg: Config, args: argparse.Namespace) -> int:
         DriveClient,
         DriveError,
         NotSignedIn,
-        load_token,
-        login,
-        read_client_secret,
-        save_token,
+        sign_in,
         token_path,
     )
 
     path = token_path(cfg.data_dir)
     if args.drive_command == "login":
-        if args.client_secret is not None:
-            client_id, client_secret = read_client_secret(args.client_secret)
-        else:
-            # Signing in again (a revoked or expired sign-in, a new scope): reuse the
-            # OAuth client saved with the last sign-in instead of asking for the file.
-            try:
-                saved = load_token(path)
-            except NotSignedIn:
-                print(
-                    "error: first sign-in needs --client-secret, the client_secret_*.json "
-                    "downloaded from Google Cloud Console",
-                    file=sys.stderr,
-                )
-                return 2
-            client_id, client_secret = saved.client_id, saved.client_secret
-        token = login(client_id, client_secret, open_browser=not args.no_browser)
-        client = DriveClient(token)
-        try:
-            token.account = client.account()
-        finally:
-            client.close()
-        save_token(path, token)
+        token = sign_in(cfg.data_dir, args.client_secret, open_browser=not args.no_browser)
         print(f"signed in as {token.account}; token saved to {path}")
         if not cfg.drive.enabled:
             print(f"now set `enabled = true` under [drive] in {cfg.source}")
@@ -361,6 +358,32 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("init", help="write a starter config file")
     s.add_argument("--force", action="store_true", help="overwrite an existing config")
 
+    s = sub.add_parser(
+        "setup",
+        help="set everything up: models, config, agents, background indexing",
+        description="Check and set up everything filesonar needs. Safe to run again: "
+        "only what is missing is changed.",
+    )
+    s.add_argument("-y", "--yes", action="store_true", help="accept every default answer")
+    s.add_argument(
+        "--folder", dest="folders", action="append", type=Path, default=[], metavar="PATH",
+        help="a folder to search (repeat for more); default: Documents, Pictures, ...",
+    )  # fmt: skip
+    s.add_argument(
+        "--vision", action=argparse.BooleanOptionalAction, default=None,
+        help="download the vision model that describes photos (about 6 GB)",
+    )  # fmt: skip
+    s.add_argument(
+        "--drive-client-secret",
+        type=Path,
+        metavar="JSON",
+        help="connect Google Drive with this file",
+    )
+    s.add_argument("--openclaw", metavar="PATH", help="path to the openclaw command")
+    s.add_argument("--no-claude-code", action="store_true", help="do not add to Claude Code")
+    s.add_argument("--no-service", action="store_true", help="no background indexing service")
+    s.add_argument("--no-index", action="store_true", help="do not index right away")
+
     sub.add_parser("doctor", help="check models, OCR and folders")
 
     s = sub.add_parser("index", help="index new and changed files")
@@ -413,6 +436,8 @@ def main(argv: list[str] | None = None) -> int:
         logging.getLogger(noisy).setLevel(logging.WARNING)
     if args.command == "init":
         return cmd_init(args)
+    if args.command == "setup":
+        return cmd_setup(args)
     try:
         cfg = load_config(args.config)
         handlers = {

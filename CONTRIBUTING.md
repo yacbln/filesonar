@@ -61,3 +61,11 @@ filesonar handles private files, so a few things are not negotiable:
 2. Generate a sample in `tests/samples.py` and add tests in `tests/test_extract.py`,
    including a corrupt file.
 3. Mention it in the README table.
+
+## Releasing (maintainers)
+
+1. Move the "Unreleased" entries in `CHANGELOG.md` under a new version heading and set
+   the same `version` in `pyproject.toml`.
+2. Commit, then tag and push: `git tag v0.2.0 && git push origin v0.2.0`.
+3. The `Release` workflow tests, builds and publishes to PyPI through trusted publishing
+   (no API token exists to leak). It refuses a tag that does not match the version.

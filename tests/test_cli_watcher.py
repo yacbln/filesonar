@@ -8,6 +8,7 @@ import pytest
 from conftest import FakeCaptioner, FakeEmbedder, write
 
 from filesonar import cli
+from filesonar.db import Database
 from filesonar.indexer import Indexer
 from filesonar.watcher import watch
 
@@ -68,23 +69,28 @@ def test_watcher_picks_up_changes(home, cfg, db):
     thread = threading.Thread(
         target=watch, args=(indexer,), kwargs={"quiet_seconds": 0.3, "stop": stop}, daemon=True
     )
+    # The watcher thread owns `db`. Checking through that same connection from this
+    # thread raced with it now and then (sqlite3.InterfaceError inside the watcher),
+    # so look the way any other process would: through a connection of our own.
+    reader = Database(cfg.db_path)
     thread.start()
     try:
         time.sleep(0.5)
         f = write(home / "new/receipt.txt", "hardware store receipt")
-        _wait(lambda: db.get_file(str(f)) is not None)
+        _wait(lambda: reader.get_file(str(f)) is not None)
         f.rename(home / "new/receipt-2024.txt")
         _wait(
             lambda: (
-                db.get_file(str(home / "new/receipt-2024.txt")) is not None
-                and db.get_file(str(f)) is None
+                reader.get_file(str(home / "new/receipt-2024.txt")) is not None
+                and reader.get_file(str(f)) is None
             )
         )
         (home / "new/receipt-2024.txt").unlink()
-        _wait(lambda: db.all_paths() == [])
+        _wait(lambda: reader.all_paths() == [])
     finally:
         stop.set()
         thread.join(timeout=10)
+        reader.close()
     assert not thread.is_alive()
 
 

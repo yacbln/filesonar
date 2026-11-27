@@ -35,7 +35,7 @@ With [Google Drive](#google-drive) enabled, the same goes for files in your Driv
 
 ## Install
 
-You need Linux with Python 3.10 or newer (Ubuntu 22.04 and later, Debian 12, Fedora, Arch, …) and [Ollama](https://ollama.com/download), which runs the models on your computer:
+You need Linux with Python 3.10 or newer: tested on fresh Ubuntu 22.04 and 24.04, Debian, Fedora 45 and Arch. macOS and Windows are not supported yet (on Windows, WSL should work). You also need [Ollama](https://ollama.com/download), which runs the models on your computer:
 
 ```bash
 curl -fsSL https://ollama.com/install.sh | sh     # if you do not have Ollama yet
@@ -269,6 +269,21 @@ Images that could not be captioned are retried automatically the next time the v
 - **"meaning-based search unavailable"** — Ollama is not running or the embedding model is not pulled.
 - **Photos suddenly take 10+ seconds each** — Ollama loaded the vision model while video memory was short and split it between GPU and CPU; it stays split until reloaded. `filesonar doctor` warns about this. Free some GPU memory and run `ollama stop qwen2.5vl:7b`; the next photo loads it fully onto the GPU.
 - **A file is not found** — check that its folder is in `roots`, that it is not excluded or hidden, and `filesonar status` for errors. `filesonar -v index` prints every file it reads.
+- **Indexing stops when you log out of a server** — user services end with your session unless lingering is on: `sudo loginctl enable-linger $USER` (setup points this out on machines without a desktop).
+
+## Upgrade and uninstall
+
+```bash
+pipx upgrade filesonar && filesonar setup     # setup refreshes the skill and restarts the service
+```
+
+```bash
+filesonar uninstall        # stops the service, unregisters from OpenClaw and Claude Code,
+                           # removes the skill, signs out of Google Drive
+pipx uninstall filesonar
+```
+
+`uninstall` keeps the index and your settings unless you say otherwise (or pass `--delete-data`), so reinstalling later does not mean indexing everything again. It never touches your own files.
 
 ## Roadmap
 
@@ -279,6 +294,7 @@ Images that could not be captioned are retried automatically the next time the v
 - [ ] Audio and video (transcripts and key frames)
 - [ ] More formats: `.odt`, `.pptx`, `.xlsx`, `.epub`
 - [ ] macOS support
+- [ ] Windows support (WSL may already work)
 
 Ideas and pull requests are welcome.
 

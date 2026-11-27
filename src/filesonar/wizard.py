@@ -8,6 +8,8 @@ setup prints the command to install it.
 
 from __future__ import annotations
 
+import contextlib
+import getpass
 import os
 import shlex
 import shutil
@@ -466,7 +468,19 @@ class Setup:
             self.warn(f"could not start {SERVICE_NAME}: {result.stderr.strip()}")
             return False
         self.ok(f"{SERVICE_NAME} {'restarted' if active else 'started'} (starts with your session)")
+        self._linger_note()
         return True
+
+    def _linger_note(self) -> None:
+        """On a server (no desktop), user services stop at logout unless lingering is on."""
+        loginctl = self.which("loginctl")
+        if not loginctl or os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"):
+            return
+        user = getpass.getuser()
+        got = self.run([loginctl, "show-user", user, "--property=Linger", "--value"])
+        if got.returncode == 0 and got.stdout.strip() == "no":
+            print("    It stops when you log out. On a server, keep it running with:")
+            print(f"      sudo loginctl enable-linger {user}")
 
     def first_index(self, cfg: Config, background: bool) -> None:
         from .db import Database
@@ -482,7 +496,7 @@ class Setup:
                 if background
                 else ("run `filesonar index` to pick up changes")
             )
-            self.ok(f"{files} files already indexed; {later}")
+            self.ok(f"{files} file{'' if files == 1 else 's'} already indexed; {later}")
             return
         if background:
             self.ok("indexing has started in the background")
@@ -517,3 +531,150 @@ class Setup:
 class _IndexArgs:
     rebuild: bool = False
     verbose: bool = False
+
+
+SKILL_MARKER = "name: filesonar"
+UNIT_MARKER = "filesonar: keep the file content index up to date"
+
+
+class Uninstall(Setup):
+    """Undo what setup did, so that `pipx uninstall filesonar` leaves nothing running.
+
+    The index and config are kept unless asked (``purge``): they took time to build,
+    and a reinstall picks them up again."""
+
+    def __init__(self, opts: Options, *, purge: bool | None = None, **kwargs):
+        super().__init__(opts, **kwargs)
+        self.purge = purge
+
+    def main(self) -> int:
+        print("filesonar uninstall: removes what `filesonar setup` added.")
+        cfg = self._load_existing()
+        cfg = cfg if isinstance(cfg, Config) else None
+
+        self.step("Background service")
+        self.remove_service()
+        self.step("AI agents")
+        self.remove_openclaw()
+        self.remove_claude_code()
+        self.step("Google Drive")
+        self.sign_out_of_drive(cfg)
+        self.step("Index and settings")
+        self.remove_data(cfg)
+
+        print("\nDone." if not self.problems else "\nDone, with things to look at:")
+        for problem in self.problems:
+            print(f"  ! {problem}")
+        print("\nTo remove the program itself:  pipx uninstall filesonar")
+        return 0
+
+    def remove_service(self) -> None:
+        unit = self.home / ".config/systemd/user" / SERVICE_NAME
+        systemctl = self.which("systemctl")
+        if not unit.exists():
+            self.ok("no background service installed")
+            return
+        if UNIT_MARKER not in unit.read_text():
+            self.warn(f"{unit} was not written by filesonar; left as is")
+            return
+        if systemctl:
+            self.run([systemctl, "--user", "disable", "--now", SERVICE_NAME])
+        unit.unlink()
+        if systemctl:
+            self.run([systemctl, "--user", "daemon-reload"])
+        self.ok(f"{SERVICE_NAME} stopped and removed")
+
+    def remove_openclaw(self) -> None:
+        openclaw = self.opts.openclaw or os.environ.get("OPENCLAW") or self.which("openclaw")
+        if not openclaw:
+            return
+        shown = self.run([openclaw, "mcp", "show", "filesonar"])
+        if shown.returncode == 0:
+            if self.run([openclaw, "mcp", "unset", "filesonar"]).returncode == 0:
+                self.ok("OpenClaw: filesonar unregistered")
+                self.run([openclaw, "mcp", "reload"])
+            else:
+                self.warn("OpenClaw: could not unregister; run: openclaw mcp unset filesonar")
+        got = self.run([openclaw, "config", "get", "agents.defaults.workspace"])
+        lines = got.stdout.strip().splitlines() if got.returncode == 0 else []
+        workspace = Path(lines[-1]).expanduser() if lines else self.home / ".openclaw/workspace"
+        skill = workspace / "skills" / "filesonar" / "SKILL.md"
+        if skill.is_file() and not skill.is_symlink() and SKILL_MARKER in skill.read_text():
+            skill.unlink()
+            with contextlib.suppress(OSError):
+                skill.parent.rmdir()  # only if nothing else is in it
+            self.ok(f"OpenClaw: skill removed ({skill})")
+
+    def remove_claude_code(self) -> None:
+        claude = self.which("claude")
+        if not claude or self.run([claude, "mcp", "get", "filesonar"]).returncode != 0:
+            return
+        if self.run([claude, "mcp", "remove", "--scope", "user", "filesonar"]).returncode == 0:
+            self.ok("Claude Code: filesonar removed")
+        else:
+            self.warn("Claude Code: could not remove; run: claude mcp remove filesonar")
+
+    def sign_out_of_drive(self, cfg: Config | None) -> None:
+        import httpx
+
+        from .config import default_data_dir
+        from .drive import DriveClient, DriveError, NotSignedIn, token_path
+
+        data_dir = cfg.data_dir if cfg else default_data_dir()
+        path = token_path(data_dir)
+        try:
+            client = DriveClient.from_data_dir(data_dir)
+        except NotSignedIn:
+            self.ok("not signed in")
+            return
+        except DriveError as exc:
+            self.warn(f"{exc}")
+            return
+        try:
+            client.revoke()
+            self.ok("Google access revoked")
+        except (httpx.HTTPError, DriveError):
+            self.warn(
+                "could not reach Google to revoke access; remove filesonar at "
+                "https://myaccount.google.com/permissions"
+            )
+        finally:
+            client.close()
+        path.unlink(missing_ok=True)
+        self.ok("Drive sign-in deleted from this computer")
+
+    def remove_data(self, cfg: Config | None) -> None:
+        from . import outbox
+        from .config import default_data_dir, default_outbox_dir
+
+        out = cfg.outbox_dir if cfg else default_outbox_dir()
+        if out.is_dir():
+            removed = outbox.clean(out, keep_hours=0)
+            with contextlib.suppress(OSError):
+                out.rmdir()
+            self.ok(f"removed {removed} file(s) prepared for sending")
+        data_dir = cfg.data_dir if cfg else default_data_dir()
+        # Only files filesonar creates, by name: data_dir may be a folder holding
+        # other things, so it is never deleted wholesale.
+        ours = [
+            p
+            for p in [*sorted(data_dir.glob("index*.sqlite3*")), self.config_path]
+            if p.is_file() and not p.is_symlink()
+        ]
+        if not ours:
+            return
+        purge = self.purge
+        if purge is None:
+            print("  The index (what filesonar learned about your files) and your settings:")
+            for p in ours:
+                print(f"    {p}")
+            purge = self.ask.yes("Delete them too? Your own files are never touched", False)
+        if not purge:
+            self.ok("index and settings kept; `filesonar setup` would use them again")
+            return
+        for p in ours:
+            p.unlink()
+        self.ok(f"deleted the index and settings ({len(ours)} files)")
+        for folder in (data_dir, self.config_path.parent):
+            with contextlib.suppress(OSError):
+                folder.rmdir()  # only if now empty

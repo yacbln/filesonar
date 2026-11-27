@@ -384,6 +384,16 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--no-service", action="store_true", help="no background indexing service")
     s.add_argument("--no-index", action="store_true", help="do not index right away")
 
+    s = sub.add_parser(
+        "uninstall",
+        help="undo setup: stop the service, unregister from agents, sign out of Drive",
+        description="Remove what `filesonar setup` added. Your own files are never touched; "
+        "the index and settings are kept unless you ask. Then: pipx uninstall filesonar",
+    )
+    s.add_argument("-y", "--yes", action="store_true", help="no questions; keeps the index")
+    s.add_argument("--delete-data", action="store_true", help="also delete index and settings")
+    s.add_argument("--openclaw", metavar="PATH", help="path to the openclaw command")
+
     sub.add_parser("doctor", help="check models, OCR and folders")
 
     s = sub.add_parser("index", help="index new and changed files")
@@ -438,6 +448,11 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_init(args)
     if args.command == "setup":
         return cmd_setup(args)
+    if args.command == "uninstall":
+        from .wizard import Options, Uninstall
+
+        opts = Options(config_path=args.config, assume_yes=args.yes, openclaw=args.openclaw)
+        return Uninstall(opts, purge=True if args.delete_data else None).main()
     try:
         cfg = load_config(args.config)
         handlers = {

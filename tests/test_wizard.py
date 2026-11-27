@@ -9,7 +9,7 @@ import pytest
 from filesonar import wizard
 from filesonar.config import load_config, render_config, set_toml_value, tomllib
 from filesonar.drive import Token, save_token, token_path
-from filesonar.wizard import Options, Prompter, Setup
+from filesonar.wizard import Options, Prompter, Setup, Uninstall
 
 EXE = "/opt/bin/filesonar"
 
@@ -63,6 +63,8 @@ class FakeSystem:
             if rest[:2] == ["mcp", "add"]:
                 self.openclaw_servers[rest[2]] = rest[rest.index("--command") + 1]
                 return done()
+            if rest[:2] == ["mcp", "unset"]:
+                return done(0 if self.openclaw_servers.pop(rest[2], None) else 1)
             if rest[:2] == ["config", "get"]:
                 return done(0, f"{self.workspace}\n")
             return done()
@@ -72,11 +74,17 @@ class FakeSystem:
             if rest[:2] == ["mcp", "add"]:
                 self.claude_servers.add("filesonar")
                 return done()
+            if rest[:2] == ["mcp", "remove"]:
+                self.claude_servers.discard("filesonar")
+                return done()
         if name == "systemctl":
             if not self.systemd:
                 return done(1)
             if "is-active" in rest:
                 return done(0 if self.active else 3)
+            if "disable" in rest:
+                self.enabled = self.active = False
+                return done()
             if "enable" in rest:
                 self.enabled = True
             if "--now" in rest or "restart" in rest:
@@ -114,15 +122,16 @@ def env(tmp_path, monkeypatch):
     system = FakeSystem(home / ".openclaw" / "workspace")
     tools = {"openclaw": "openclaw", "claude": "claude", "systemctl": "systemctl"}
 
-    def make(opts=None, answers=None, ollama=None, which=None, assume_yes=None):
+    def make(opts=None, answers=None, ollama=None, which=None, assume_yes=None, cls=Setup, **kw):
         opts = opts or Options()
         prompter = Prompter(
             opts.assume_yes if assume_yes is None else assume_yes,
             answers if answers is not None else Answers(),
         )
         lookup = tools if which is None else which
-        return Setup(
+        return cls(
             opts,
+            **kw,
             prompter=prompter,
             run=system,
             which=lookup.get,
@@ -385,3 +394,107 @@ def test_prompter_reprompts_until_it_understands():
     answers = Answers("maybe", "Y")
     assert Prompter(False, answers).yes("ok?", default=False) is True
     assert len(answers.questions) == 2
+
+
+# -- uninstall ----------------------------------------------------------------
+
+
+def test_uninstall_undoes_setup_and_keeps_the_index(env, capsys):
+    assert env(Options(assume_yes=True)).main() == 0
+    cfg = load_config(env.config)
+    staged = cfg.outbox_dir / "0123456789abcdef" / "copy.pdf"
+    staged.parent.mkdir(parents=True)
+    staged.write_text("a copy prepared for sending")
+    capsys.readouterr()
+
+    assert env(Options(assume_yes=True), cls=Uninstall).main() == 0
+    out = capsys.readouterr().out
+    assert not env.unit.exists() and not env.system.active and not env.system.enabled
+    assert env.system.ran("systemctl", "--user", "daemon-reload")
+    assert env.system.openclaw_servers == {} and env.system.claude_servers == set()
+    assert not env.skill.exists() and not env.skill.parent.exists()
+    assert not staged.exists()
+    assert env.config.exists() and cfg.db_path.exists()  # kept by default
+    assert "pipx uninstall filesonar" in out and "index and settings kept" in out
+
+
+def test_uninstall_can_delete_data_but_only_filesonars_own_files(env, tmp_path):
+    shared = tmp_path / "shared-folder"
+    shared.mkdir()
+    (shared / "my-notes.txt").write_text("not filesonar's")
+    config = env.home / ".config/filesonar/config.toml"
+    config.parent.mkdir(parents=True)
+    # data_dir is a top-level key, so it goes before the first [section].
+    config.write_text(f'data_dir = "{shared}"\n' + render_config([env.home / "Documents"]))
+    db_path = load_config(config).db_path
+    from filesonar.db import Database
+
+    Database(db_path).close()
+    assert env(Options(), cls=Uninstall, purge=True).main() == 0
+    assert not config.exists() and not db_path.exists()
+    assert (shared / "my-notes.txt").read_text() == "not filesonar's"
+    assert shared.exists()  # not empty, so not removed
+
+
+def test_uninstall_asks_before_deleting_data(env):
+    env(Options(assume_yes=True)).main()
+    answers = Answers("y")
+    assert env(Options(), answers=answers, cls=Uninstall).main() == 0
+    assert not env.config.exists() and not answers.answers
+
+
+def test_uninstall_leaves_a_service_it_did_not_write(env, capsys):
+    env.unit.parent.mkdir(parents=True)
+    env.unit.write_text("[Service]\nExecStart=/usr/bin/something-else\n")
+    assert env(Options(assume_yes=True), cls=Uninstall).main() == 0
+    assert env.unit.exists() and "not written by filesonar" in capsys.readouterr().out
+
+
+def test_uninstall_signs_out_of_drive(env, monkeypatch, capsys):
+    env(Options(assume_yes=True)).main()
+    cfg = load_config(env.config)
+    save_token(token_path(cfg.data_dir), Token("cid", "csecret", "refresh", "me@example.com"))
+    revoked = []
+
+    class FakeClient:
+        def revoke(self):
+            revoked.append(True)
+
+        def close(self):
+            pass
+
+    from filesonar.drive import DriveClient
+
+    monkeypatch.setattr(DriveClient, "from_data_dir", classmethod(lambda cls, d: FakeClient()))
+    assert env(Options(assume_yes=True), cls=Uninstall).main() == 0
+    assert revoked and not token_path(cfg.data_dir).exists()
+    assert "Google access revoked" in capsys.readouterr().out
+
+
+def test_uninstall_on_a_clean_machine_is_harmless(env, capsys):
+    assert env(Options(assume_yes=True), cls=Uninstall).main() == 0
+    out = capsys.readouterr().out
+    assert "no background service installed" in out and "Done." in out
+
+
+def test_headless_server_gets_the_linger_hint(env, monkeypatch, capsys):
+    monkeypatch.delenv("DISPLAY", raising=False)
+    monkeypatch.delenv("WAYLAND_DISPLAY", raising=False)
+    real = env.system.__call__
+
+    def with_loginctl(cmd, timeout=120):
+        if cmd[0] == "loginctl":
+            return subprocess.CompletedProcess(cmd, 0, "no\n", "")
+        return real(cmd, timeout)
+
+    which = {"systemctl": "systemctl", "loginctl": "loginctl"}
+    setup = env(Options(assume_yes=True), which=which)
+    setup.run = with_loginctl
+    assert setup.main() == 0
+    assert "sudo loginctl enable-linger" in capsys.readouterr().out
+
+    monkeypatch.setenv("DISPLAY", ":0")  # a desktop: nothing to say
+    setup = env(Options(assume_yes=True), which=which)
+    setup.run = with_loginctl
+    setup.main()
+    assert "enable-linger" not in capsys.readouterr().out

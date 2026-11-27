@@ -15,6 +15,13 @@ the README says:
 - Python 3.10 is supported, so the stock `pipx` on Ubuntu 22.04 installs filesonar
   (it failed with "No matching distribution found").
 - The README says how to get `pipx` and Ollama on a fresh system.
+- `filesonar uninstall` undoes setup: stops and removes the service (otherwise it would
+  keep restarting after `pipx uninstall`), unregisters from OpenClaw and Claude Code,
+  removes the skill and revokes Google Drive access. It keeps the index and settings
+  unless asked (`--delete-data`), and then deletes only files filesonar created.
+- On a server without a desktop, setup explains how to keep the service running after
+  logout (`loginctl enable-linger`).
+- Tested on fresh Fedora 45 (Python 3.15) and Arch (Python 3.14); CI covers 3.10 to 3.14.
 - `filesonar setup` shows model download progress that only goes up (it restarted at
   0% for each part of the model).
 

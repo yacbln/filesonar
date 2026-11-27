@@ -31,10 +31,19 @@ SHARED = "Shared with me"
 PREVIEW_SIDE = 1600
 
 # Google's own formats have no file to download; they are exported.
+_PPTX = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+_XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+# How Google's own formats are read: exported to a format filesonar reads (and the
+# extension it is read as), with a plainer export to fall back on. Slides as .pptx
+# keep one entry per slide; Sheets as .xlsx keep every sheet (CSV has only the first).
 GOOGLE_EXPORTS = {
     "application/vnd.google-apps.document": ("text/plain", "document"),
     "application/vnd.google-apps.presentation": ("text/plain", "document"),
-    "application/vnd.google-apps.spreadsheet": ("text/csv", "text"),
+    "application/vnd.google-apps.spreadsheet": ("text/csv", "document"),
+}
+_RICH_EXPORTS = {
+    "application/vnd.google-apps.presentation": (_PPTX, ".pptx"),
+    "application/vnd.google-apps.spreadsheet": (_XLSX, ".xlsx"),
 }
 # What to send when the user asks for a Google Docs file itself.
 GOOGLE_SEND_AS = {
@@ -345,9 +354,22 @@ class DriveIndexer:
         limit = int(ix.max_file_size_mb * 1024 * 1024)
         name, mime = file["name"], file.get("mimeType", "")
         if mime in GOOGLE_EXPORTS:
+            base = PurePosixPath(_clean(name)).name
+            if mime in _RICH_EXPORTS:
+                rich_mime, suffix = _RICH_EXPORTS[mime]
+                try:
+                    data = self.client.export(file["id"], rich_mime, _EXPORT_LIMIT)
+                except DriveError as exc:
+                    # Google refuses exports over 10 MB (a deck full of pictures);
+                    # the plain-text export still has all the words.
+                    log.info("%s: %s export failed (%s); using text", name, suffix, exc)
+                else:
+                    extraction = self._extract(Path(base + suffix), data)
+                    if extraction is not None:
+                        extraction.kind = kind
+                        return data, extraction
             data = self.client.export(file["id"], GOOGLE_EXPORTS[mime][0], _EXPORT_LIMIT)
-            stand_in = Path(PurePosixPath(_clean(name)).name + ".txt")
-            extraction = self._extract(stand_in, data)
+            extraction = self._extract(Path(base + ".txt"), data)
             if extraction is not None:
                 extraction.kind = kind
             return data, extraction

@@ -93,7 +93,7 @@ def test_full_scan_indexes_supported_files(fake, dindexer, ddb, tmp_path):
     assert pdf["link"].startswith("https://drive.google.com/")
     assert pdf["md5"] and pdf["path"] == drive_key(pdf["remote_id"])
     assert rows["Trip plan"]["kind"] == "document"
-    assert rows["budget"]["kind"] == "text"
+    assert rows["budget"]["kind"] == "document"  # a spreadsheet, like an .xlsx file
     assert ddb.get_meta("drive_page_token") == str(len(fake.changes))
 
 
@@ -199,6 +199,64 @@ def test_drive_scans_are_read_again_once_ocr_is_installed(
     assert report.updated == 1 and fake.downloads.count(f.id) == 2
     assert ddb.conn.execute("SELECT ocr FROM files").fetchone()[0] == 1
     assert "4471" in " ".join(r[0] for r in ddb.conn.execute("SELECT text FROM chunks"))
+
+
+SLIDES = "application/vnd.google-apps.presentation"
+SHEETS = "application/vnd.google-apps.spreadsheet"
+PPTX = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
+def test_google_slides_are_read_per_slide(fake, dindexer, ddb, tmp_path):
+    from test_office import pptx
+
+    deck = pptx(tmp_path / "d.pptx", [["Kickoff"], ["Hiring two firmware engineers"]]).read_bytes()
+    fake.add("Team plan", mime=SLIDES, export={PPTX: deck, "text/plain": b"Kickoff Hiring"})
+    dindexer.sync()
+    pages = ddb.conn.execute("SELECT page, text FROM chunks WHERE source = 'text'").fetchall()
+    assert [p["page"] for p in pages] == [1, 2] and "firmware" in pages[1]["text"]
+
+
+def test_google_sheets_keep_every_sheet(fake, dindexer, ddb, tmp_path):
+    from test_office import zip_file
+
+    x = 'xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"'
+    book = zip_file(
+        tmp_path / "b.xlsx",
+        {
+            f"xl/worksheets/sheet{n}.xml": f"<worksheet {x}><sheetData><row><c t='inlineStr'>"
+            f"<is><t>{word}</t></is></c></row></sheetData></worksheet>"
+            for n, word in ((1, "rent"), (2, "groceries"))
+        },
+    ).read_bytes()
+    fake.add("Budget", mime=SHEETS, export={XLSX: book, "text/csv": b"rent"})
+    dindexer.sync()
+    text = " ".join(r[0] for r in ddb.conn.execute("SELECT text FROM chunks"))
+    assert "groceries" in text  # the second sheet, which CSV leaves out
+
+
+def test_slides_too_large_to_export_fall_back_to_text(fake, dindexer, ddb):
+    fake.add("Photo deck", mime=SLIDES, export={"text/plain": b"Holiday photos from Lisbon"})
+    report = dindexer.sync()
+    assert report.added == 1 and report.failed == 0
+    assert "Lisbon" in " ".join(r[0] for r in ddb.conn.execute("SELECT text FROM chunks"))
+
+
+def test_existing_slides_and_sheets_are_read_again_once(fake, dindexer, ddb):
+    deck = fake.add("Deck", mime=SLIDES, export={"text/plain": b"one"})
+    doc = fake.add("Doc", mime="application/vnd.google-apps.document", export={"text/plain": b"2"})
+    dindexer.sync()
+    links = {"Deck": "presentation/d/x/edit", "Doc": "document/d/y/edit"}
+    for name, link in links.items():  # what real Drive links look like
+        ddb.conn.execute(
+            "UPDATE files SET link = ? WHERE name = ?", (f"https://docs.google.com/{link}", name)
+        )
+    ddb.set_meta("reader_version", "2")  # as left by the previous version
+    from filesonar.indexer import READER_CHANGES, READER_VERSION
+
+    assert ddb.upgrade_readers(READER_VERSION, READER_CHANGES) == 1  # the deck, not the doc
+    assert dindexer.sync(full=True).updated == 1
+    assert fake.downloads.count(deck.id) == 2 and fake.downloads.count(doc.id) == 1
 
 
 def test_file_already_on_this_computer_is_not_downloaded(

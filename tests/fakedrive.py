@@ -149,6 +149,13 @@ class FakeDrive:
             if f is None:
                 return httpx.Response(404, json={"error": {"message": "File not found"}})
             if m.group(2):
+                if params["mimeType"] not in f.export:
+                    # What Drive says when a file is too large to export in a format.
+                    return httpx.Response(
+                        403,
+                        json={"error": {"message": "This file is too large to be exported.",
+                                        "errors": [{"reason": "exportSizeLimitExceeded"}]}},
+                    )  # fmt: skip
                 self.downloads.append(file_id)
                 return httpx.Response(200, content=f.export[params["mimeType"]])
             if params.get("alt") == "media":

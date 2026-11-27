@@ -30,10 +30,15 @@ from .pathrules import is_hidden, within
 
 log = logging.getLogger(__name__)
 
-# Bumped when the way some file types are read improves; files of those types already
-# in the index are then read again, once. Version 2: HTML without markup and scripts.
-READER_VERSION = 2
-READER_CHANGES = {2: (".html", ".htm", ".xhtml")}
+# Bumped when the way some files are read improves; such files already in the index
+# are then read again, once (see Database.upgrade_readers).
+READER_VERSION = 3
+READER_CHANGES = {
+    # Web pages as the text a reader sees, without markup and scripts.
+    2: (("name", ".html"), ("name", ".htm"), ("name", ".xhtml")),
+    # Google Slides per slide and Google Sheets with every sheet (via .pptx / .xlsx).
+    3: (("link", "/presentation/"), ("link", "/spreadsheets/")),
+}
 
 _HASH_BLOCK = 1 << 20
 

@@ -35,7 +35,7 @@ Optionally, it can also index your [Google Drive](#google-drive) — the files a
 | Web pages (`.html`) | What a reader sees: no markup, scripts or styles |
 | Text (`.txt`, `.md`, `.csv`, `.json`, …) | As is |
 
-With [Google Drive](#google-drive) enabled, the same goes for files in your Drive, plus Google Docs, Sheets and Slides. Coming next: audio and video. See the [roadmap](#roadmap).
+With [Google Drive](#google-drive) enabled, the same goes for files in your Drive, plus Google Docs, Sheets (every sheet) and Slides (slide by slide). Coming next: audio and video. See the [roadmap](#roadmap).
 
 ## Install
 

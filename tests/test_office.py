@@ -283,7 +283,7 @@ def test_html_indexed_by_an_older_version_is_read_again_once(home, indexer, db):
     write(home / "page.html", "<html><body><p>visa appointment</p></body></html>")
     write(home / "notes.txt", "plain notes")
     assert indexer.run().added == 2
-    assert db.get_meta("reader_version") == "2"  # a new index needs no upgrade
+    assert db.get_meta("reader_version") == "3"  # a new index needs no upgrade
     assert indexer.run().unchanged == 2
 
     db.set_meta("reader_version", "1")  # as left by 0.1.x, which kept the markup
@@ -299,7 +299,7 @@ def test_reader_upgrade_matches_file_endings_literally(home, indexer, db):
     write(home / "a_b%c.txt", "the literal name")
     indexer.run()
     db.conn.execute("DELETE FROM meta WHERE key = 'reader_version'")
-    assert db.upgrade_readers(2, {2: (".htm", "_b%c.txt")}) == 2  # page.htm, a_b%c.txt
+    assert db.upgrade_readers(2, {2: (("name", ".htm"), ("name", "_b%c.txt"))}) == 2
     assert db.get_file(str(home / "aXbYc.txt"))["sha256"]  # untouched
 
 

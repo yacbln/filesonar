@@ -13,6 +13,10 @@ All notable changes are listed here. The format follows
   unpack to more than 200 MB, and XML with entity declarations is refused.
 - Web pages (`.html`) are indexed as the text a reader sees, without markup, scripts or
   styles. Pages indexed by an earlier version are read again once.
+- Google Slides are read per slide (results point to the slide) and Google Sheets with
+  every sheet, by exporting them as `.pptx` / `.xlsx`; CSV only ever had the first
+  sheet. A deck too large for Google's 10 MB export limit falls back to plain text.
+  Slides and Sheets already indexed are read again once, on the next full Drive scan.
 - Placeholder titles and authors ("Unknown Title", "Untitled") are not indexed.
 - `scripts/eval_search.py --same-files-as INDEX` measures two indexes with exactly the
   same queries; `--config` works (it failed with a type error).

@@ -6,6 +6,15 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+- Search now uses what a query says about the file it wants. "photos of the soccer
+  game" ranks a photo above a note that mentions soccer (also videos, recordings,
+  voice memos, screenshots), and "bank statement for May 2023" ranks the file that
+  mentions May 2023 above the May 2024 one. A code in the query (booking reference,
+  order or policy number) puts the file containing exactly that code first. All are
+  soft boosts; searches without such words rank exactly as before.
+- `benchmark/`: about 1,000 realistic personal files and 420 searches, comparing
+  file-name, keyword, meaning and hybrid search. See benchmark/README.md.
+
 ## [0.3.2] - 2026-11-27
 
 - Search results carry the sending rule themselves (`how_to_send`) and flag files too

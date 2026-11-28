@@ -225,3 +225,79 @@ def test_clear_keyword_winner_beats_middling_matches():
     assert all(scores[1] > scores[m] for m in middling[5:])
     old = fuse([(keyword, 1.0), (meaning, 1.0)], k=60)
     assert all(old[1] < old[m] for m in middling[5:])  # the behaviour this guards against
+
+
+@pytest.mark.parametrize(
+    ("query", "kinds"),
+    [
+        ("photos of our dog", {"image"}),
+        ("screenshot of the rent payment", {"image"}),
+        ("video from the concert", {"video"}),
+        ("voice memo with the mechanic's advice", {"audio"}),
+        ("recording of rain", {"audio"}),
+        ("car insurance policy", set()),
+        ("the voice of reason", set()),
+    ],
+)
+def test_wanted_kinds(query, kinds):
+    from filesonar.search import wanted_kinds
+
+    assert wanted_kinds(query) == kinds
+
+
+@pytest.mark.parametrize(
+    ("query", "date"),
+    [
+        ("bank statement for May 2023", ("2023", 5)),
+        ("electric bill for Dec 2024", ("2024", 12)),
+        ("2021 tax return", ("2021", None)),
+        ("taxes 2021 vs 2023", None),  # two years: no single date wanted
+        ("bank statement for May", None),  # no year
+        ("order number 512-8830114", None),
+    ],
+)
+def test_wanted_date(query, date):
+    from filesonar.search import wanted_date
+
+    assert wanted_date(query) == date
+
+
+@pytest.mark.parametrize(
+    ("query", "codes"),
+    [
+        ("booking reference K7Q2ZP", ["k7q2zp"]),
+        ("order number 512-8830114", ["512-8830114"]),
+        ("policy NW-58213-04", ["nw-58213-04"]),
+        ("tax return 2023", []),
+        ("my W-2 form", []),
+        ("the H2O bill", []),
+    ],
+)
+def test_wanted_codes(query, codes):
+    from filesonar.search import wanted_codes
+
+    assert wanted_codes(query) == codes
+
+
+def test_named_kind_and_date_break_ties(home, indexer, searcher, monkeypatch):
+    """With keyword and meaning scores equal, the kind of file and the date the query
+    names decide: the photo beats a note about the same thing, and the statement for
+    the month asked about beats the one a year later."""
+    import filesonar.search as fsearch
+
+    write(home / "Notes" / "bike.txt", "sell the red bicycle in the garage")
+    photo(home / "Pictures" / "IMG_0042.jpg")  # the fake captioner sees a red bicycle
+    for year in (2023, 2024):
+        text_pdf(home / "Bank" / f"statement-{year}.pdf",
+                 [f"Checking statement. Statement period: May 1 - May 31, {year}"])  # fmt: skip
+    indexer.run()
+    real = fsearch.fuse
+    monkeypatch.setattr(fsearch, "fuse", lambda lists, k=None: dict.fromkeys(real(lists, k), 1.0))
+    assert searcher.search("photo of the red bicycle")[0].kind == "image"
+    assert searcher.search("picture of the bicycle in the garage")[0].kind == "image"
+    assert searcher.search("checking statement May 2023")[0].name == "statement-2023.pdf"
+    assert searcher.search("checking statement May 2024")[0].name == "statement-2024.pdf"
+    write(home / "Travel" / "a.txt", "Flight booking. Booking reference: K7Q2ZP")
+    write(home / "Travel" / "b.txt", "Flight booking. Booking reference: R58VJ5")
+    indexer.run()
+    assert searcher.search("booking reference R58VJ5")[0].name == "b.txt"

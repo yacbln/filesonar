@@ -37,7 +37,42 @@ Optionally, it can also index your [Google Drive](#google-drive) — the files a
 | Web pages (`.html`) | What a reader sees: no markup, scripts or styles |
 | Text (`.txt`, `.md`, `.csv`, `.json`, …) | As is |
 
-With [Google Drive](#google-drive) enabled, the same goes for files in your Drive, plus Google Docs, Sheets (every sheet) and Slides (slide by slide). Coming next: audio and video. See the [roadmap](#roadmap).
+With [Google Drive](#google-drive) enabled, the same goes for files in your Drive, plus Google Docs, Sheets (every sheet) and Slides (slide by slide). See the [roadmap](#roadmap) for what is next.
+
+## How well it finds things
+
+On a [benchmark](benchmark/README.md) of about 1,000 realistic personal files (bills,
+statements, receipts photographed on a phone, scans, handwritten notes, photos, voice
+memos, videos) and 420 searches phrased the way people ask, filesonar puts the right
+file in its top 3 **94%** of the time, and first **86%** of the time. Searching by file
+name, which is what a file manager does, manages 40%.
+
+| Kind of search | By file name | filesonar |
+|---|---|---|
+| Describing the file ("the water bill from this past March") | 71% | 99% |
+| A question about what is inside ("how much did I pay for the air fryer") | 39% | 100% |
+| Text only in a picture: receipts, scans, screenshots, handwriting | 16% | 95% |
+| Photos by what they show ("sunset at the beach") | 0% | 98% |
+| Voice memos and videos by what is said or shown | 25% / 0% | 94% / 100% |
+| Misspelled ("reciept for the dishwaser") | 50% | 83% |
+| **All searches** | **40%** | **94%** |
+
+Right file in the top 3. Full results, including keyword-only and meaning-only search,
+are in [benchmark/results/REPORT.md](benchmark/results/REPORT.md); you can run it
+yourself with `python benchmark/run.py`.
+
+What it does not do well yet:
+
+- **Sounds without speech** (rain, music, a dog barking) are not recognised, so they
+  are found only by name: 0% on the benchmark.
+- **Things you do not have**: it returns the closest matches rather than "nothing found".
+- On this benchmark, meaning-only search puts the right file first slightly more often
+  (88% vs 86%). filesonar combines it with keyword search because on real collections
+  exact words, names and codes matter, and keyword search finds those where meaning
+  search alone does not.
+
+The documents in the benchmark are generated; the photos, sounds and handwriting fonts
+are real. Everything in it is made up or public domain.
 
 ## Install
 
@@ -259,6 +294,7 @@ Found a problem? Please see [SECURITY.md](https://github.com/yacbln/filesonar/bl
 
 - Changes are detected by size and modification time first and confirmed with a SHA-256 of the content, so unchanged files are never read twice and a moved file keeps its index entry.
 - Keyword and meaning results are merged with reciprocal rank fusion. Matches by meaning only count if they are genuinely close; otherwise unrelated searches would always "find" something.
+- What the search itself says counts too: "photos of …" or "voice memo …" favours that kind of file, "May 2023" favours files that mention that month, and a code such as a booking reference favours the file that contains it exactly.
 - If Ollama is not running, search keeps working with keywords only and says so.
 
 ## Performance

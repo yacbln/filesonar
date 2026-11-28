@@ -1,0 +1,98 @@
+{
+  "about": "Searches people make for their own files, with the files that count as a right answer. Categories: exact (a detail like a number or a name), describe (says what the file is), question (asks about something inside it), visual (only in a picture: receipt, screenshot, scan), spoken (only said in a recording), language (a French file), vague (little to go on).",
+  "queries": [
+    {"q": "car insurance policy", "cat": "describe", "want": ["Insurance/auto-policy-2024.pdf"]},
+    {"q": "how much do I pay for car insurance", "cat": "question", "want": ["Insurance/auto-policy-2024.pdf"]},
+    {"q": "home insurance deductible", "cat": "question", "want": ["Insurance/home-insurance-declarations.pdf"]},
+    {"q": "renters insurance from my old apartment", "cat": "describe", "want": ["Insurance/renters-insurance-old-apartment.pdf"]},
+    {"q": "health insurance member ID", "cat": "visual", "want": ["Insurance/health-insurance-card.png"]},
+    {"q": "policy NW-58213", "cat": "exact", "want": ["Insurance/auto-policy-2024.pdf"]},
+
+    {"q": "my apartment lease", "cat": "describe", "want": ["Housing/lease-agreement-2023.pdf", "Housing/lease-renewal-offer-2024.docx"]},
+    {"q": "how much was the security deposit for the apartment", "cat": "question", "want": ["Housing/lease-agreement-2023.pdf"]},
+    {"q": "are pets allowed in my lease", "cat": "question", "want": ["Housing/lease-agreement-2023.pdf"]},
+    {"q": "letter about the rent going up", "cat": "describe", "want": ["Housing/lease-renewal-offer-2024.docx"]},
+    {"q": "electric bill from March", "cat": "describe", "want": ["Housing/electric-bill-march-2024.pdf", "Bills/Electric/metro-power-2023-03.pdf"]},
+    {"q": "internet bill", "cat": "visual", "want": ["Housing/internet-bill-scan.pdf"]},
+    {"q": "move out checklist", "cat": "describe", "want": ["Housing/move-out-checklist.md"]},
+
+    {"q": "2023 tax return", "cat": "describe", "want": ["Taxes/2023-tax-return-summary.pdf"]},
+    {"q": "how big was my tax refund", "cat": "question", "want": ["Taxes/2023-tax-return-summary.pdf"]},
+    {"q": "W-2 form", "cat": "visual", "want": ["Taxes/w2-2023-scan.pdf"]},
+    {"q": "bank statement for May", "cat": "describe", "want": ["Finance/bank-statement-may-2024.pdf", "Finance/Statements/cedar-checking-2023-05.pdf"]},
+    {"q": "monthly budget spreadsheet", "cat": "describe", "want": ["Finance/monthly-budget-2024.xlsx"]},
+    {"q": "how much have we saved for the Lisbon vacation", "cat": "question", "want": ["Finance/monthly-budget-2024.xlsx"]},
+    {"q": "latest pay stub", "cat": "describe", "want": ["Finance/paystub-june-2024.pdf"]},
+    {"q": "how much is left on the car loan", "cat": "question", "want": ["Finance/car-loan-statement.pdf"]},
+
+    {"q": "receipt for the dishwasher", "cat": "visual", "want": ["Receipts/IMG_1057.jpg", "Manuals/dishwasher-warranty.pdf"]},
+    {"q": "receipt from the hardware store", "cat": "visual", "want": ["Receipts/IMG_1043.jpg"]},
+    {"q": "how much did the cordless drill cost", "cat": "visual", "want": ["Receipts/IMG_1043.jpg"]},
+    {"q": "grocery receipt", "cat": "visual", "want": ["Receipts/IMG_1102.jpg"]},
+    {"q": "receipt from dinner at the Italian restaurant", "cat": "visual", "want": ["Receipts/scan_0007.png"]},
+    {"q": "pharmacy receipt for Maya's antibiotics", "cat": "visual", "want": ["Receipts/pharmacy-receipt.png"]},
+
+    {"q": "dishwasher warranty", "cat": "describe", "want": ["Manuals/dishwasher-warranty.pdf", "Receipts/IMG_1057.jpg"]},
+    {"q": "when does my laptop warranty end", "cat": "question", "want": ["Manuals/laptop-warranty-registration.html"]},
+    {"q": "how to descale the coffee maker", "cat": "question", "want": ["Manuals/coffee-maker-manual.pdf"]},
+    {"q": "bookshelf assembly instructions", "cat": "describe", "want": ["Manuals/bookshelf-assembly-instructions.pdf"]},
+
+    {"q": "my resume", "cat": "describe", "want": ["Career/Sam_Rivera_Resume_2024.docx", "Career/Sam_Rivera_Resume_2022_old.docx"]},
+    {"q": "cover letter for Acme", "cat": "exact", "want": ["Career/Cover_Letter_Acme_Analytics.docx"]},
+    {"q": "what salary did Brightline offer me", "cat": "question", "want": ["Career/offer-letter-brightline.pdf"]},
+    {"q": "last year's performance review", "cat": "describe", "want": ["Career/performance-review-2023.docx"]},
+    {"q": "job posting for the lead data analyst role", "cat": "describe", "want": ["Career/job-posting-lead-data-analyst.txt"]},
+    {"q": "Q3 sales presentation", "cat": "describe", "want": ["Work/Q3-sales-review.pptx", "Videos/quarterly-update.mp4"]},
+    {"q": "which region grew fastest", "cat": "question", "want": ["Work/Q3-sales-review.pptx"]},
+    {"q": "project timeline", "cat": "describe", "want": ["Work/project-timeline.xlsx"]},
+    {"q": "notes from the meeting where we pushed back the launch", "cat": "describe", "want": ["Work/meeting-notes-2024-05-14.md"]},
+    {"q": "team offsite agenda", "cat": "describe", "want": ["Work/team-offsite-agenda.odt"]},
+
+    {"q": "blood test results", "cat": "describe", "want": ["Health/blood-test-results-2024.pdf"]},
+    {"q": "was my vitamin D low", "cat": "question", "want": ["Health/blood-test-results-2024.pdf"]},
+    {"q": "Maya's vaccination record", "cat": "visual", "want": ["Health/vaccination-record-scan.pdf"]},
+    {"q": "dentist appointment", "cat": "visual", "want": ["Health/dentist-appointment-confirmation.png", "Voice/voice-memo-001.m4a"]},
+    {"q": "knee exercises from physical therapy", "cat": "describe", "want": ["Health/physical-therapy-knee-exercises.docx"]},
+
+    {"q": "school supply list", "cat": "describe", "want": ["Kids/school-supply-list-grade-3.pdf"]},
+    {"q": "Maya's report card", "cat": "visual", "want": ["Kids/report-card-spring.pdf"]},
+    {"q": "permission slip for the museum trip", "cat": "describe", "want": ["Kids/field-trip-permission-slip.docx"]},
+    {"q": "soccer practice schedule", "cat": "describe", "want": ["Kids/soccer-practice-schedule.csv"]},
+
+    {"q": "flight booking to Lisbon", "cat": "describe", "want": ["Travel/flight-confirmation-lisbon.pdf", "Travel/boarding-pass.png"]},
+    {"q": "booking reference K7Q2ZP", "cat": "exact", "want": ["Travel/flight-confirmation-lisbon.pdf"]},
+    {"q": "boarding pass", "cat": "visual", "want": ["Travel/boarding-pass.png"]},
+    {"q": "where are we staying in Lisbon", "cat": "question", "want": ["Travel/hotel-booking-lisbon.html"]},
+    {"q": "passport renewal form", "cat": "describe", "want": ["Travel/passport-renewal-form.pdf"]},
+    {"q": "packing list", "cat": "describe", "want": ["Travel/packing-list.txt"]},
+    {"q": "Rome trip plan", "cat": "describe", "want": ["Travel/rome-itinerary-2022.docx"]},
+
+    {"q": "chickpea curry recipe", "cat": "describe", "want": ["Recipes/chickpea-curry.md"]},
+    {"q": "grandma's banana bread", "cat": "describe", "want": ["Recipes/grandmas-banana-bread.txt"]},
+    {"q": "lasagna recipe", "cat": "visual", "want": ["Recipes/lasagna-recipe-scan.pdf"]},
+    {"q": "guest wifi password", "cat": "describe", "want": ["Home/wifi-for-guests.txt"]},
+    {"q": "what are we planting in the garden this summer", "cat": "question", "want": ["Home/vegetable-garden-plan.ods"]},
+    {"q": "when was the last oil change", "cat": "question", "want": ["Home/car-maintenance-log.xlsx"]},
+
+    {"q": "Maya's birth certificate", "cat": "visual", "want": ["Personal/birth-certificate-scan.pdf"]},
+    {"q": "marriage certificate", "cat": "describe", "want": ["Personal/marriage-certificate.pdf"]},
+    {"q": "my old lease in Montreal", "cat": "language", "want": ["Personal/contrat-de-location-montreal.pdf"]},
+    {"q": "contrat de location", "cat": "language", "want": ["Personal/contrat-de-location-montreal.pdf"]},
+    {"q": "facture d'électricité", "cat": "language", "want": ["Personal/facture-electricite-2018.txt"]},
+    {"q": "book about saving money", "cat": "describe", "want": ["Books/the-art-of-saving.epub"]},
+
+    {"q": "screenshot of the rent payment", "cat": "visual", "want": ["Screenshots/Screenshot_2024-06-01_bank.png"]},
+    {"q": "where was the dinner on Saturday", "cat": "visual", "want": ["Screenshots/Screenshot_2024-06-20_chat.png", "Receipts/scan_0007.png"]},
+    {"q": "parking ticket", "cat": "visual", "want": ["Screenshots/IMG_2290.png"]},
+
+    {"q": "voice note about calling the dentist", "cat": "spoken", "want": ["Voice/voice-memo-001.m4a"]},
+    {"q": "ideas for Maya's birthday party", "cat": "spoken", "want": ["Voice/voice-memo-002.m4a"]},
+    {"q": "recording of the meeting where we cut the marketing budget", "cat": "spoken", "want": ["Voice/budget-meeting-recording.m4a"]},
+    {"q": "video of the quarterly update", "cat": "spoken", "want": ["Videos/quarterly-update.mp4", "Work/Q3-sales-review.pptx"]},
+    {"q": "video showing how to restart the router", "cat": "spoken", "want": ["Videos/how-to-reset-the-router.mp4"]},
+
+    {"q": "that thing about the apartment", "cat": "vague", "want": ["Housing/lease-agreement-2023.pdf", "Housing/lease-renewal-offer-2024.docx", "Housing/move-out-checklist.md"]},
+    {"q": "doctor stuff", "cat": "vague", "want": ["Health/blood-test-results-2024.pdf", "Health/dentist-appointment-confirmation.png", "Health/physical-therapy-knee-exercises.docx", "Health/vaccination-record-scan.pdf"]},
+    {"q": "the Larkfield thing", "cat": "vague", "want": ["Receipts/IMG_1057.jpg", "Manuals/dishwasher-warranty.pdf"]}
+  ]
+}

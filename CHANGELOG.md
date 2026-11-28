@@ -6,6 +6,8 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-27
+
 - **New default embedding model: `embeddinggemma`** (621 MB). On the benchmark it puts
   the right file first far more often than `nomic-embed-text`, and on a real
   16,000-file index it is better for local files and Google Drive alike. Existing
@@ -26,6 +28,9 @@ All notable changes are listed here. The format follows
   `confidence: "low"` and tells the agent to say the file was not found and offer the
   results only as possibilities, instead of handing over the wrong file with
   confidence. On a real index, no flagged search had the right file first.
+  A match far closer in meaning than every other file counts as confident even when it
+  shares no words with the query ("renting a flat" for the only lease), and is kept
+  even a little past the usual distance cutoff.
 - Search now uses what a query says about the file it wants. "photos of the soccer
   game" ranks a photo above a note that mentions soccer (also videos, recordings,
   voice memos, screenshots), and "bank statement for May 2023" ranks the file that

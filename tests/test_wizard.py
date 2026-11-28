@@ -648,3 +648,15 @@ def test_sound_model_is_downloaded_with_speech_recognition(env, capsys):
 def test_sound_model_already_there_is_not_downloaded_again(env, capsys):
     assert env(Options(assume_yes=True)).main() == 0
     assert not FakeSounds.downloads and "sound recognition" in capsys.readouterr().out
+
+
+def test_first_index_passes_every_option_the_index_command_reads():
+    """setup runs `filesonar index` itself; a new option on that command once crashed
+    the first index on every fresh install."""
+    from filesonar.cli import build_parser
+
+    defaults = vars(build_parser().parse_args(["index"]))
+    defaults = {k: v for k, v in defaults.items() if k not in ("command", "config")}
+    args = wizard._IndexArgs()
+    for name, value in defaults.items():
+        assert getattr(args, name) == value, name

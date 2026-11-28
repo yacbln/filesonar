@@ -303,7 +303,9 @@ def test_named_kind_and_date_break_ties(home, indexer, searcher, monkeypatch):
     assert searcher.search("booking reference R58VJ5")[0].name == "b.txt"
 
 
-def test_confidence_reflects_how_well_the_best_result_matches(corpus, searcher):
+def test_confidence_reflects_how_well_the_best_result_matches(corpus, searcher, monkeypatch):
+    # With five files any match stands out; this checks the shared-words part alone.
+    monkeypatch.setattr("filesonar.search._STANDOUT_GAP", 9.0)
     searcher.search("car insurance policy")
     assert searcher.last_confidence == "high"
     # Only the common word matches; the word that says what is wanted is in no file.
@@ -339,3 +341,18 @@ def test_each_embedding_model_has_its_own_cutoffs():
     assert calibration("nomic-embed-text", 0.5)[0] == 0.5  # a real choice is kept
     assert calibration("embeddinggemma", 0.5)[0] == 0.5
     assert calibration("some-new-model", None) == (0.44, 0.35)
+
+
+def test_a_match_far_closer_than_every_other_file_is_confident(corpus, searcher, monkeypatch):
+    """No shared words and not close by the usual measure, but nothing else is anywhere
+    near: "renting a flat" for the only lease is a confident answer."""
+    import filesonar.search as fsearch
+
+    monkeypatch.setattr(fsearch, "query_terms", lambda q: ["nomatch"])  # no shared words
+    searcher._confident_distance = 0.0  # every match counts as "not close"
+    searcher.search("lease agreement apartment rent")
+    assert searcher.last_signals[0] == 0.0
+    assert searcher.last_confidence == "high"  # it stands out from every other file
+    monkeypatch.setattr(fsearch, "_STANDOUT_GAP", 9.0)  # as if other files were as close
+    searcher.search("lease agreement apartment rent")
+    assert searcher.last_confidence == "low"

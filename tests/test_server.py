@@ -47,9 +47,11 @@ def test_search_files(server, home):
     assert data["results"][0]["path"] == str(home / "taxes/2023-return.txt")
 
 
-def test_search_says_when_nothing_clearly_matches(server):
+def test_search_says_when_nothing_clearly_matches(server, monkeypatch):
     """Only "return" matches, and "boat" is in no file at all: the closest file comes
     back flagged, so the agent says it did not find a boat document."""
+    # Two files only: any match stands out. This checks the shared-words part alone.
+    monkeypatch.setattr("filesonar.search._STANDOUT_GAP", 9.0)
     data = call(server, "search_files", {"query": "boat return"})
     assert data["results"] and data["confidence"] == "low"
     assert "did not find" in data["note"]

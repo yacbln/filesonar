@@ -75,8 +75,10 @@ def test_semantic_search_with_real_embeddings(real, home, query, expected):
     cfg, db, client = real
     build_corpus(home)
     Indexer(cfg, db, OllamaEmbedder(client), None).run()
-    hits = Searcher(db, OllamaEmbedder(client), cfg.search).search(query)
+    searcher = Searcher(db, OllamaEmbedder(client), cfg.search)
+    hits = searcher.search(query)
     assert hits and os.path.basename(hits[0].path) == expected
+    assert searcher.last_confidence == "high"  # the right file, so no "not found" note
 
 
 def test_unrelated_query_finds_nothing(real, home):

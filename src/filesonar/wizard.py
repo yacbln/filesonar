@@ -666,7 +666,10 @@ class Setup:
 
 @dataclass
 class _IndexArgs:
+    """What `filesonar index` would get with no options (kept in step by a test)."""
+
     rebuild: bool = False
+    reembed: bool = False
     verbose: bool = False
 
 

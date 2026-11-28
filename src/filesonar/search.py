@@ -266,7 +266,7 @@ class Searcher:
         self.embedder = embedder
         self.cfg = cfg or SearchConfig()
         self.last_warning: str | None = None
-        # "low" when even the best result matches the query poorly (see _confidence).
+        # "low" when even the best result matches the query poorly (weak match, few shared words).
         self.last_confidence: str | None = None
         self.last_signals: tuple[float, float] | None = None
         self._distances: dict[int, float] = {}
@@ -315,6 +315,13 @@ class Searcher:
         if not kept:
             kept = self._standout(found)
         return kept
+
+    def _stands_out(self, file_id: int, distance: float) -> bool:
+        """True if every other file is at least _STANDOUT_GAP farther in meaning."""
+        near = sorted(self._distances.items(), key=lambda item: item[1])[:50]
+        files = self.db.file_ids([cid for cid, _ in near])
+        other = next((d for c, d in near if files.get(c) != file_id), None)
+        return other is not None and other - distance >= _STANDOUT_GAP
 
     def _standout(self, found: list[tuple[int, float]]) -> list[int]:
         """The best match when it is a little past the cutoff but far closer than any
@@ -438,7 +445,13 @@ class Searcher:
         text = " ".join([top["name"], *texts.get(top_key, [])])
         self.last_signals = (coverage(terms, text, self._rarity(terms)), closest.get(top_key, 9.0))
         cover, distance = self.last_signals
-        low = cover < _MIN_COVERAGE and distance > self._confident_distance
+        # A standout (far closer in meaning than every other file) is confident even
+        # without shared words: "renting a flat" for the only lease.
+        low = (
+            cover < _MIN_COVERAGE
+            and distance > self._confident_distance
+            and not self._stands_out(top["id"], distance)
+        )
         self.last_confidence = "low" if low else "high"
         ceiling = scored[0][0]
         hits = []

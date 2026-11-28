@@ -189,7 +189,12 @@ def cmd_index(cfg: Config, args: argparse.Namespace) -> int:
             print(
                 f"embedding the indexed text with {cfg.models.embedding_model} ...", file=sys.stderr
             )
+            steps = iter(range(1, 1 << 30))
+            indexer.progress = lambda msg: (
+                print(f"... {msg}", file=sys.stderr, flush=True) if next(steps) % 20 == 0 else None
+            )
             print(f"re-embedded {indexer.reembed()} pieces of text")
+            indexer.progress = progress
         report = indexer.run()
         print(report.summary())
         _print_errors(report)

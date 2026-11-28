@@ -1,6 +1,6 @@
 # filesonar benchmark (981 files, 420 searches)
 
-filesonar 0.3.2 on Linux x86_64, x86_64, NVIDIA GeForce RTX 3090. Models: embeddinggemma (text), qwen2.5vl:7b (pictures), whisper base (speech), ast-audioset (sounds). Indexing took 10 min 11 s.
+filesonar 0.4.0 on Linux x86_64, x86_64, NVIDIA GeForce RTX 3090. Models: embeddinggemma (text), qwen2.5vl:7b (pictures), whisper base (speech), ast-audioset (sounds). Indexing took 10 min 0 s.
 
 | | filename | keyword | meaning | filesonar |
 |---|---|---|---|---|
@@ -8,7 +8,7 @@ filesonar 0.3.2 on Linux x86_64, x86_64, NVIDIA GeForce RTX 3090. Models: embedd
 | Right file in top 3 | 40% | 90% | 96% | 98% |
 | MRR | 0.39 | 0.84 | 0.96 | 0.96 |
 | 95% range, top 3 | 36%–45% | 87%–93% | 94%–98% | 97%–100% |
-| Time per search | 1.0 ms | 1.8 ms | 11.7 ms | 13.4 ms |
+| Time per search | 1.0 ms | 1.7 ms | 11.1 ms | 12.6 ms |
 | Right file first, yet flagged unsure | 0.0% | 6.0% | 2.0% | 1.5% |
 
 ## Right file in the top 3, by kind of search

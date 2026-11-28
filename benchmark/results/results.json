@@ -1,5 +1,5 @@
 {
- "filesonar_version": "0.3.2",
+ "filesonar_version": "0.4.0",
  "machine": "Linux x86_64, x86_64, NVIDIA GeForce RTX 3090",
  "models": {
   "embedding": "embeddinggemma",
@@ -9,8 +9,8 @@
  },
  "files": 981,
  "searches": 420,
- "index_seconds": 611,
- "index_report": "981 files checked in 610.6s: 981 added, 0 updated, 0 moved, 0 removed, 0 unchanged, 0 skipped, 0 failed",
+ "index_seconds": 600,
+ "index_report": "981 files checked in 599.9s: 981 added, 0 updated, 0 moved, 0 removed, 0 unchanged, 0 skipped, 0 failed",
  "methods": {
   "filename": {
    "all": {
@@ -230,7 +230,7 @@
     0.8675,
     0.9275
    ],
-   "median_ms": 1.8,
+   "median_ms": 1.7,
    "by_kind": {
     "describe": {
      "n": 144,
@@ -434,7 +434,7 @@
     0.9425,
     0.98
    ],
-   "median_ms": 11.7,
+   "median_ms": 11.1,
    "by_kind": {
     "describe": {
      "n": 144,
@@ -638,7 +638,7 @@
     0.9725,
     0.995
    ],
-   "median_ms": 13.4,
+   "median_ms": 12.6,
    "by_kind": {
     "describe": {
      "n": 144,

@@ -42,7 +42,7 @@ dependencies = [
 
 [project.optional-dependencies]
 # Speech recognition for audio and video (on this computer). `filesonar setup` offers it.
-media = ["faster-whisper>=1.1"]
+media = ["faster-whisper>=1.1", "onnxruntime>=1.17", "numpy"]
 dev = ["pytest>=8", "pytest-cov>=5", "ruff>=0.6"]
 
 [project.scripts]

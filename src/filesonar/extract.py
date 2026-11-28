@@ -378,8 +378,9 @@ def extract_media(
     cfg: MediaConfig,
     captioner: Captioner | None = None,
     transcriber: media.Transcriber | None = None,
+    tagger: media.SoundTagger | None = None,
 ) -> Extraction:
-    """What is said and shown in a recording, read from an open file descriptor."""
+    """What is said, heard and shown in a recording, read from an open file descriptor."""
     kind = kind_for(path) or "video"
     try:
         info = media.probe(fd)
@@ -390,16 +391,32 @@ def extract_media(
     # configured but not there yet (or failed) leaves it False, to be retried later.
     captioned = not (info.has_video and cfg.frames and captioner is not None)
     language = None
-    if cfg.transcribe and info.has_audio and transcriber is not None and transcriber.available():
+    speech = cfg.transcribe and transcriber is not None and transcriber.available()
+    sounds = cfg.sounds and tagger is not None and tagger.available()
+    samples = None
+    if info.has_audio and (speech or sounds):
         try:
-            transcript = transcriber.transcribe(media.decode_audio(fd, cfg.max_minutes * 60))
-        except Exception as exc:  # decoding or the speech library: lose this transcript only
+            samples = media.decode_audio(fd, cfg.max_minutes * 60)
+        except Exception as exc:  # unreadable sound: the rest of the file still counts
+            log.warning("%s: could not read the sound: %s", path, exc)
+    if samples is not None and speech:
+        try:
+            transcript = transcriber.transcribe(samples)
+        except Exception as exc:  # the speech library: lose this transcript only
             log.warning("%s: could not read the sound: %s", path, exc)
         else:
             text = media.transcript_text(transcript)
             if text:
                 segments.append(Segment(_clean(text), source="speech"))
                 language = transcript.language
+    if samples is not None and sounds:
+        try:
+            labels = tagger.tag(samples)
+        except Exception as exc:  # the sound model: lose these labels only
+            log.warning("%s: could not name the sounds: %s", path, exc)
+        else:
+            if labels:
+                segments.append(Segment(media.sounds_text(labels), source="sound"))
     if not captioned and captioner.available():
         times = media.frame_times(info.duration, cfg.frames)
         sheet = media.contact_sheet(fd, times)

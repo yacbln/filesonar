@@ -6,6 +6,26 @@ All notable changes are listed here. The format follows
 
 ## [Unreleased]
 
+- **New default embedding model: `embeddinggemma`** (621 MB). On the benchmark it puts
+  the right file first far more often than `nomic-embed-text`, and on a real
+  16,000-file index it is better for local files and Google Drive alike. Existing
+  installs keep their model until they switch: set `embedding_model =
+  "embeddinggemma"`, `ollama pull embeddinggemma`, then `filesonar index --reembed`.
+- `filesonar index --reembed`: after changing the embedding model, computes the vectors
+  again from the text already indexed. Nothing is read, transcribed or described again,
+  so it takes minutes instead of hours. An interrupted run finishes on the next index.
+- `max_distance` is now calibrated for each supported model and no longer needs to be
+  set; a value an earlier version wrote (0.44) keeps working.
+- **Sounds in recordings are recognised** (rain, applause, a dog barking, piano: 527
+  everyday sounds), on this computer, with the Audio Spectrogram Transformer (MIT,
+  BSD-3-Clause). Recordings without speech can now be found. `filesonar setup`
+  downloads the model (90 MB, checked against a fixed checksum) with speech
+  recognition. Recordings already indexed are read again once to add their sounds.
+- **"Nothing clearly matches."** When the best result shares few of the query's rarer
+  words and is not close in meaning either, `search_files` returns it with
+  `confidence: "low"` and tells the agent to say the file was not found and offer the
+  results only as possibilities, instead of handing over the wrong file with
+  confidence. On a real index, no flagged search had the right file first.
 - Search now uses what a query says about the file it wants. "photos of the soccer
   game" ranks a photo above a note that mentions soccer (also videos, recordings,
   voice memos, screenshots), and "bank statement for May 2023" ranks the file that

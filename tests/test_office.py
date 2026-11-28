@@ -283,7 +283,9 @@ def test_html_indexed_by_an_older_version_is_read_again_once(home, indexer, db):
     write(home / "page.html", "<html><body><p>visa appointment</p></body></html>")
     write(home / "notes.txt", "plain notes")
     assert indexer.run().added == 2
-    assert db.get_meta("reader_version") == "3"  # a new index needs no upgrade
+    from filesonar.indexer import READER_VERSION
+
+    assert db.get_meta("reader_version") == str(READER_VERSION)  # a new index needs no upgrade
     assert indexer.run().unchanged == 2
 
     db.set_meta("reader_version", "1")  # as left by 0.1.x, which kept the markup

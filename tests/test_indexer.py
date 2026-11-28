@@ -197,16 +197,50 @@ def test_captions_disabled_in_config(home, make_cfg, db, embedder):
     assert cap.calls == 0
 
 
-def test_changing_embedding_model_requires_rebuild(home, cfg, db, embedder):
+def test_changing_embedding_model_requires_reembedding(home, cfg, db, embedder):
     write(home / "a.txt", "alpha")
     Indexer(cfg, db, embedder).run()
     write(home / "b.txt", "beta")
     other = FakeEmbedder()
     other.name = "different-model"
-    with pytest.raises(RuntimeError, match="rebuild"):
+    with pytest.raises(RuntimeError, match="reembed"):
         Indexer(cfg, Database(cfg.db_path), other).run()
     db.reset()
     assert Indexer(cfg, db, other).run().added == 2
+
+
+def test_reembed_switches_model_without_reading_files_again(home, cfg, db, embedder):
+    from filesonar.search import Searcher
+
+    write(home / "a.txt", "alpha lease")
+    photo(home / "p.jpg")
+    cap = FakeCaptioner()
+    Indexer(cfg, db, embedder, cap).run()
+    chunks = db.conn.execute("SELECT count(*) FROM chunks").fetchone()[0]
+    other = FakeEmbedder()
+    other.name = "different-model"
+    cap2 = FakeCaptioner()
+    indexer = Indexer(cfg, db, other, cap2)
+    assert indexer.reembed() == chunks
+    assert cap2.calls == 0  # nothing was read or described again
+    assert db.get_meta("embedding_model") == "different-model"
+    assert db.conn.execute("SELECT count(*) FROM chunks_vec").fetchone()[0] == chunks
+    assert indexer.run().unchanged == 2
+    searcher = Searcher(db, other)
+    assert searcher.search("alpha lease")[0].name == "a.txt"
+    assert searcher.last_warning is None  # meaning search works with the new model
+
+
+def test_interrupted_reembedding_finishes_on_the_next_run(home, cfg, db, embedder):
+    write(home / "a.txt", "alpha")
+    Indexer(cfg, db, embedder).run()
+    other = FakeEmbedder()
+    other.name = "different-model"
+    db.set_meta("reembedding", "different-model")
+    db.drop_vectors()  # as if stopped half way
+    Indexer(cfg, db, other).run()
+    assert db.get_meta("reembedding") is None
+    assert db.get_meta("embedding_model") == "different-model"
 
 
 def test_update_paths_handles_files_and_folders(home, indexer, db):

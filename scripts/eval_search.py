@@ -144,6 +144,7 @@ def main() -> None:
         rows = [r for r in rows if r["path"] in keep]
     ranks: dict[str, list[int | None]] = {}
     times: list[float] = []
+    low: list[int | None] = []  # rank of the wanted file when search said "low confidence"
     for row in random.sample(rows, min(args.n, len(rows))):
         chunks = db.conn.execute(
             "SELECT text FROM chunks WHERE file_id = ? AND source != 'metadata'", (row["id"],)
@@ -161,6 +162,8 @@ def main() -> None:
             None,
         )  # fmt: skip
         ranks.setdefault(row["origin"], []).append(rank)
+        if searcher.last_confidence == "low":
+            low.append(rank)
         if args.show_misses and (rank is None or rank > 2):
             print(f"  miss: {query!r} -> wanted {row['name'][:40]!r}, got",
                   [h.name[:30] for h in hits[:3]])  # fmt: skip
@@ -171,6 +174,11 @@ def main() -> None:
         top1 = sum(r == 0 for r in found) / n
         top3 = sum(r is not None and r < 3 for r in found) / n
         print(f"  {origin:<6} n={n:<4} top1={top1:.0%}  top3={top3:.0%}")
+    n_all = sum(len(r) for r in ranks.values())
+    if n_all:
+        right = sum(r == 0 for r in low)
+        print(f"  low confidence: {len(low)}/{n_all} searches ({len(low) / n_all:.0%}), "
+              f"right file first in {right} of them")  # fmt: skip
     if times:
         times.sort()
         print(

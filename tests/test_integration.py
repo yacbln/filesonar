@@ -1,7 +1,7 @@
 """End-to-end tests against a real Ollama server and the real MCP stdio transport.
 
 Run with: pytest -m ollama
-They need `ollama pull nomic-embed-text` (and the vision model for the caption test).
+They need `ollama pull embeddinggemma` (and the vision model for the caption test).
 """
 
 import asyncio

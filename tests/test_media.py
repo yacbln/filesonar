@@ -60,15 +60,33 @@ class FakeTranscriber:
         return Transcript("en" if self.parts else None, self.parts)
 
 
+class FakeTagger:
+    name = "fake-sounds"
+
+    def __init__(self, labels=("Rain", "Thunder"), available=True):
+        self.labels = list(labels)
+        self._available = available
+
+    def available(self):
+        return self._available
+
+    def tag(self, samples):
+        assert len(samples) > 0
+        return self.labels
+
+
 @pytest.fixture
 def media_indexer(cfg, db, embedder):
-    def build(transcriber=None, captioner=None, **media_cfg):
+    def build(transcriber=None, captioner=None, tagger=None, **media_cfg):
         config = cfg
         if media_cfg:
             from dataclasses import replace
 
             config = replace(cfg, media=replace(cfg.media, **media_cfg))
-        return Indexer(config, db, embedder, captioner or FakeCaptioner(), None, transcriber)
+        return Indexer(
+            config, db, embedder, captioner or FakeCaptioner(), None, transcriber,
+            tagger=tagger or FakeTagger(),
+        )  # fmt: skip
 
     return build
 
@@ -162,10 +180,35 @@ def test_silent_video_is_described_and_says_so(home, db, media_indexer):
 @needs_ffmpeg
 def test_music_is_found_by_its_tags_not_by_made_up_words(home, db, media_indexer):
     make(home / "track.mp3", video=False, tags={"title": "Ya Rayah", "artist": "Dahmane"})
-    media_indexer(FakeTranscriber(parts=[])).run()  # the model heard no speech
+    # The speech model heard no words; the sound model hears music and a guitar.
+    media_indexer(FakeTranscriber(parts=[]), tagger=FakeTagger(["Music", "Guitar"])).run()
     r = row(db, "track.mp3")
-    assert r["kind"] == "audio" and r["status"] == "empty"
+    assert r["kind"] == "audio"
     assert "title: Ya Rayah" in r["details"] and "artist: Dahmane" in r["details"]
+    got = chunks(db, "track.mp3")
+    assert ("sound", "sounds: music, guitar") in got
+    assert not [c for c in got if c[0] == "speech"]
+
+
+@needs_ffmpeg
+def test_recordings_are_found_by_their_sounds(home, db, embedder, media_indexer):
+    make(home / "Audio 3.m4a", video=False)
+    media_indexer(FakeTranscriber(parts=[]), tagger=FakeTagger(["Rain", "Thunder"])).run()
+    from filesonar.search import Searcher
+
+    hits = Searcher(db, embedder).search("recording of rain")
+    assert hits and hits[0].name == "Audio 3.m4a" and hits[0].matched_in == "sound"
+
+
+@needs_ffmpeg
+def test_sound_model_set_up_later_reads_recordings_again(home, db, media_indexer):
+    make(home / "storm.m4a", video=False)
+    speech = FakeTranscriber(parts=[])
+    media_indexer(speech, tagger=FakeTagger(available=False)).run()
+    assert not row(db, "storm.m4a")["ocr"]  # not fully read yet
+    report = media_indexer(speech, tagger=FakeTagger(["Thunderstorm"])).run()
+    assert report.updated == 1
+    assert ("sound", "sounds: thunderstorm") in chunks(db, "storm.m4a")
 
 
 @needs_ffmpeg
@@ -395,3 +438,42 @@ def test_drive_copy_of_a_local_video_gets_its_transcript(cfg, home, embedder):
     ]
     assert drive_text == ["[0:00] hello from the birthday party"] and f.id not in fake.downloads
     db.close()
+
+
+def test_sound_filter_bank_covers_the_spectrum():
+    np = pytest.importorskip("numpy")
+    from filesonar.media import _kaldi_mel_filters
+
+    filters = _kaldi_mel_filters(np)
+    assert filters.shape == (128, 257)
+    # Like Kaldi's (which the model was trained with), a few of the narrowest low bands
+    # fall between two frequency bins and stay empty.
+    assert (filters.sum(axis=1) > 0).sum() >= 125
+    assert filters[:, 0].sum() == 0  # nothing below 20 Hz
+
+
+def test_sound_tagger_without_its_model(tmp_path):
+    from filesonar.media import SoundTagger
+
+    tagger = SoundTagger(tmp_path)
+    assert not tagger.ready()
+    assert tagger.tag([0.0] * 16000) == []
+
+
+def test_sound_model_with_a_wrong_checksum_is_refused(tmp_path, monkeypatch):
+    import contextlib
+
+    import filesonar.media as m
+
+    class Response:
+        def raise_for_status(self):
+            pass
+
+        def iter_bytes(self, size):
+            yield b"not the model"
+
+    monkeypatch.setattr("httpx.stream", lambda *a, **kw: contextlib.nullcontext(Response()))
+    tagger = m.SoundTagger(tmp_path)
+    with pytest.raises(m.MediaError, match="checksum"):
+        tagger.download()
+    assert not list((tmp_path / "sounds-ast").iterdir())  # nothing half-written is kept

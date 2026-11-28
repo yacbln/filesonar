@@ -42,6 +42,7 @@ DRIVE_SETUP_URL = "https://github.com/yacbln/filesonar#one-time-setup-about-5-mi
 CANDIDATE_FOLDERS = ("Documents", "Pictures", "Downloads", "Desktop", "Videos", "Music")
 MEDIA_FOLDERS = ("Videos", "Music")
 VISION_DOWNLOAD = "about 6 GB"
+EMBEDDING_SIZES = {"embeddinggemma": "621 MB, required", "nomic-embed-text": "274 MB, required"}
 
 Runner = Callable[..., subprocess.CompletedProcess]
 
@@ -210,7 +211,11 @@ class Setup:
 
         if cfg.embedding_model in installed:
             self.ok(f"{cfg.embedding_model} (understands text)")
-        elif not self._pull(client, cfg.embedding_model, "274 MB, required"):
+        elif not self._pull(
+            client,
+            cfg.embedding_model,
+            EMBEDDING_SIZES.get(cfg.embedding_model.split(":")[0], "required"),
+        ):
             return None
 
         wants = self.opts.vision
@@ -295,6 +300,7 @@ class Setup:
         speech = WhisperTranscriber(mcfg.speech_model, data_dir / "models")
         if speech.ready():
             self.ok(f"speech recognition ({mcfg.speech_model} model)")
+            self._sounds(mcfg, data_dir)
             return
         wants = self.opts.speech
         if wants is None:
@@ -302,7 +308,10 @@ class Setup:
             print(
                 "  Speech recognition finds recordings by what is said in them, on this computer."
             )
-            print(f"  It installs about 150 MB of software and a {size} speech model, once.")
+            print(
+                f"  It installs about 150 MB of software, a {size} speech model and a "
+                f"{media.SOUND_MODEL_SIZE} model that names sounds (rain, applause), once."
+            )
             wants = self.ask.yes("Set it up?")
         if not wants:
             self.ok("skipped; recordings are found by what they show and their details")
@@ -316,6 +325,26 @@ class Setup:
             self.warn(f"{exc}; run `filesonar setup` again later")
             return
         self.ok("speech recognition ready")
+        self._sounds(mcfg, data_dir)
+
+    def _sounds(self, mcfg, data_dir: Path) -> None:
+        """The model that names sounds in recordings (needs the speech extra)."""
+        if not mcfg.sounds:
+            self.ok("sound recognition is turned off in the config")
+            return
+        tagger = media.SoundTagger(data_dir / "models")
+        if tagger.ready():
+            self.ok("sound recognition")
+            return
+        if not tagger.installed():
+            return
+        print(f"  downloading the sound model ({media.SOUND_MODEL_SIZE}) ...")
+        try:
+            tagger.download()
+        except media.MediaError as exc:
+            self.warn(f"{exc}; run `filesonar setup` again later")
+            return
+        self.ok("sound recognition ready")
 
     def _install_speech(self) -> bool:
         """Install the optional faster-whisper package into filesonar's own environment."""
@@ -799,9 +828,12 @@ class Uninstall(Setup):
                     shutil.rmtree(entry)
                 elif entry.name == "CACHEDIR.TAG" and "huggingface" in entry.read_text()[:500]:
                     entry.unlink()
+            sounds = models / "sounds-ast"
+            if sounds.is_dir() and not sounds.is_symlink():
+                shutil.rmtree(sounds)
             with contextlib.suppress(OSError):
                 models.rmdir()
-            self.ok("deleted the speech model")
+            self.ok("deleted the speech and sound models")
         for folder in (data_dir, self.config_path.parent):
             with contextlib.suppress(OSError):
                 folder.rmdir()  # only if now empty

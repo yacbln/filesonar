@@ -191,7 +191,7 @@ class Database:
         if stored_model is not None and (stored_model != model or int(stored_dim) != dim):
             raise RuntimeError(
                 f"the index was built with {stored_model} ({stored_dim} dims) but the "
-                f"config now uses {model} ({dim} dims). Run `filesonar index --rebuild`."
+                f"config now uses {model} ({dim} dims). Run `filesonar index --reembed`."
             )
         self.conn.execute(
             f"CREATE VIRTUAL TABLE IF NOT EXISTS chunks_vec USING vec0("
@@ -199,6 +199,38 @@ class Database:
         )
         self.set_meta("embedding_model", model)
         self.set_meta("embedding_dim", str(dim))
+
+    def drop_vectors(self) -> None:
+        """Forget every vector (the text stays), e.g. before embedding with another model."""
+        with self.conn:
+            self.conn.execute("DROP TABLE IF EXISTS chunks_vec")
+            self.conn.execute("DELETE FROM meta WHERE key IN ('embedding_model','embedding_dim')")
+
+    def chunks_after(self, last_id: int, limit: int) -> list[sqlite3.Row]:
+        """Chunks in id order, with their file's name, for embedding them again."""
+        return self.conn.execute(
+            "SELECT c.id, c.text, f.name FROM chunks c JOIN files f ON f.id = c.file_id "
+            "WHERE c.id > ? ORDER BY c.id LIMIT ?",
+            (last_id, limit),
+        ).fetchall()
+
+    def add_vectors(self, pairs: Sequence[tuple[int, Sequence[float]]]) -> None:
+        with self.conn:
+            self.conn.executemany(
+                "INSERT INTO chunks_vec(rowid, embedding) VALUES (?, ?)",
+                [(cid, _serialize(v)) for cid, v in pairs],
+            )
+
+    def file_ids(self, chunk_ids: Sequence[int]) -> dict[int, int]:
+        """chunk id -> file id."""
+        if not chunk_ids:
+            return {}
+        marks = ",".join("?" * len(chunk_ids))
+        rows = self.conn.execute(
+            f"SELECT id, file_id FROM chunks WHERE id IN ({marks})",  # noqa: S608
+            list(chunk_ids),
+        ).fetchall()
+        return {r[0]: r[1] for r in rows}
 
     def has_vectors(self) -> bool:
         row = self.conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'chunks_vec'").fetchone()
@@ -378,6 +410,15 @@ class Database:
         return file_id
 
     # -- search primitives ------------------------------------------------
+
+    def chunk_count(self) -> int:
+        return self.conn.execute("SELECT count(*) FROM chunks").fetchone()[0]
+
+    def fts_count(self, match: str) -> int:
+        """How many chunks match an FTS5 query (used to tell rare words from common ones)."""
+        return self.conn.execute(
+            "SELECT count(*) FROM chunks_fts WHERE chunks_fts MATCH ?", (match,)
+        ).fetchone()[0]
 
     def fts_search(self, match: str, limit: int) -> list[tuple[int, float]]:
         rows = self.conn.execute(

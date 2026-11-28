@@ -123,6 +123,31 @@ class FakeSpeech:
         type(self).has_model = True
 
 
+class FakeSounds:
+    """Stands in for the sound model: installed with speech; downloaded as configured."""
+
+    has_model = True
+    downloads: ClassVar[list] = []
+
+    @classmethod
+    def reset(cls, model=True):
+        cls.has_model, cls.downloads = model, []
+
+    def __init__(self, models_dir):
+        self.models_dir = models_dir
+
+    @staticmethod
+    def installed():
+        return FakeSpeech.is_installed
+
+    def ready(self):
+        return self.installed() and self.has_model
+
+    def download(self):
+        type(self).downloads.append(self.models_dir)
+        type(self).has_model = True
+
+
 class Answers:
     """Scripted answers to questions; fails the test on an unexpected question."""
 
@@ -148,7 +173,9 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(wizard, "tesseract_available", lambda: True)
     monkeypatch.setattr(wizard.media, "tools_available", lambda: True)
     FakeSpeech.reset()
+    FakeSounds.reset()
     monkeypatch.setattr(wizard, "WhisperTranscriber", FakeSpeech)
+    monkeypatch.setattr(wizard.media, "SoundTagger", FakeSounds)
     system = FakeSystem(home / ".openclaw" / "workspace")
     tools = {"openclaw": "openclaw", "claude": "claude", "systemctl": "systemctl"}
 
@@ -165,7 +192,7 @@ def env(tmp_path, monkeypatch):
             prompter=prompter,
             run=system,
             which=lookup.get,
-            ollama=ollama or FakeOllama(["nomic-embed-text", "qwen2.5vl:7b"]),
+            ollama=ollama or FakeOllama(["embeddinggemma", "qwen2.5vl:7b"]),
             executable=EXE,
             home=home,
         )
@@ -188,7 +215,7 @@ def test_fresh_machine_with_defaults(env, capsys):
     out = capsys.readouterr().out
 
     # Models: the required one, and the vision one because there is a GPU.
-    assert ollama.pulled == ["nomic-embed-text", "qwen2.5vl:7b"]
+    assert ollama.pulled == ["embeddinggemma", "qwen2.5vl:7b"]
     # Config: existing home folders only (no Downloads/Desktop here), private.
     cfg = load_config(env.config)
     assert cfg.roots == (env.home / "Documents", env.home / "Pictures")
@@ -250,7 +277,7 @@ def test_without_ollama_setup_stops_before_writing_anything(env, capsys, which, 
 
 
 def test_saying_no_everywhere(env, capsys):
-    ollama = FakeOllama(["nomic-embed-text"])
+    ollama = FakeOllama(["embeddinggemma"])
     answers = Answers(
         "n",  # download the vision model? (no GPU, so the default is already no)
         "n",  # use these folders?
@@ -332,7 +359,7 @@ def test_existing_config_is_kept_and_only_the_vision_switch_changes(env, capsys)
 def test_existing_vision_choice_is_respected(env):
     env.config.parent.mkdir(parents=True)
     env.config.write_text(render_config([env.home / "Documents"], caption_images=False))
-    ollama = FakeOllama(["nomic-embed-text"])
+    ollama = FakeOllama(["embeddinggemma"])
     assert env(Options(assume_yes=True), ollama=ollama).main() == 0
     assert ollama.pulled == [] and not load_config(env.config).models.caption_images
 
@@ -602,7 +629,22 @@ def test_uninstall_deletes_the_speech_model_with_the_data(env, monkeypatch):
     (models / "blobs" / "0c").mkdir(parents=True)  # newer huggingface_hub layout
     (models / "blobs" / ".huggingface-shared-blobs").write_text("")
     (models / "CACHEDIR.TAG").write_text("Signature: x\n# created by huggingface_hub.\n")
+    (models / "sounds-ast").mkdir()
+    (models / "sounds-ast" / "model_int8.onnx").write_bytes(b"x")
     (models / "my-notes.txt").write_text("not filesonar's")
     (models / "other").mkdir()
     assert env(Options(), cls=Uninstall, purge=True).main() == 0
     assert sorted(p.name for p in models.iterdir()) == ["my-notes.txt", "other"]
+
+
+def test_sound_model_is_downloaded_with_speech_recognition(env, capsys):
+    FakeSpeech.reset(model=False)
+    FakeSounds.reset(model=False)
+    assert env(Options(assume_yes=True, speech=True)).main() == 0
+    out = capsys.readouterr().out
+    assert FakeSounds.downloads and "sound recognition ready" in out
+
+
+def test_sound_model_already_there_is_not_downloaded_again(env, capsys):
+    assert env(Options(assume_yes=True)).main() == 0
+    assert not FakeSounds.downloads and "sound recognition" in capsys.readouterr().out

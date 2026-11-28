@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import asdict, dataclass, field
 from datetime import date, datetime, timezone
@@ -96,6 +97,39 @@ _MONTHS = ["january", "february", "march", "april", "may", "june", "july", "augu
 _YEAR = re.compile(r"\b(19[5-9]\d|20\d\d)\b")
 
 
+# Words that say little about which file is meant: left out when checking how much of
+# a query the best result actually covers.
+_FILLER = set(
+    """a an the and or of for to in on at by with from about into over my our your his her
+    their its me we us i you it this that these those is was were be been are am do did
+    does have has had what which who whom whose when where why how any some all one ones
+    thing things stuff file files document documents doc docs paper papers copy find show
+    get give send look looking need want please old new last latest recent first""".split()  # noqa: SIM905
+)
+
+
+def query_terms(query: str) -> list[str]:
+    """The words of a query that name what is wanted (no filler, no kind-of-file words)."""
+    kind_words = set().union(*_KIND_WORDS.values()) | {"voice", "memo", "memos", "note"}
+    return [
+        w
+        for w in dict.fromkeys(_WORD.findall(query.lower()))
+        if w not in _FILLER and w not in kind_words and len(w) > 1 and (len(w) > 2 or w.isdigit())
+    ]
+
+
+def coverage(terms: list[str], text: str, weights: dict[str, float] | None = None) -> float:
+    """Share of ``terms`` found in ``text`` (a plural or verb ending may differ), each
+    term counting by its weight (default 1)."""
+    if not terms:
+        return 1.0
+    words = set(_WORD.findall(text.lower()))
+    stems = {w[:5] for w in words if len(w) >= 5}
+    weight = {t: (weights or {}).get(t, 1.0) for t in terms}
+    found = sum(v for t, v in weight.items() if t in words or (len(t) >= 5 and t[:5] in stems))
+    return found / (sum(weight.values()) or 1.0)
+
+
 def wanted_kinds(query: str) -> set[str]:
     """Kinds of file the query asks for in so many words ("photos of the dog")."""
     words = set(_WORD.findall(query.lower()))
@@ -184,6 +218,35 @@ def fuse(lists: list[tuple[list[int], float]], k: int | None = None) -> dict[int
     return scores
 
 
+# Each embedding model spreads distances differently, so its cutoffs are measured on
+# the benchmark (benchmark/README.md): (max_distance, confident_distance).
+# max_distance: a meaning-only match farther than this is dropped as unrelated.
+# confident_distance: a best result farther than this, which also shares few of the
+# query's words, is reported as a low-confidence match.
+CALIBRATION = {
+    "embeddinggemma": (0.60, 0.55),
+    "nomic-embed-text": (0.44, 0.35),
+}
+# Earlier configs wrote nomic-embed-text's value out; it only means "the default".
+_OLD_DEFAULT_DISTANCE = 0.44
+_MIN_COVERAGE = 0.5  # weighted by how rare each word is in the index
+# A best match up to this far past the cutoff still counts when every other file is at
+# least _STANDOUT_GAP farther away.
+_STANDOUT_SLACK = 0.08
+_STANDOUT_GAP = 0.15
+
+
+def calibration(model: str, configured: float | None) -> tuple[float, float]:
+    """(max_distance, confident_distance) for ``model``; a configured max_distance wins."""
+    base = model.split(":")[0]
+    max_distance, confident = CALIBRATION.get(base, CALIBRATION["nomic-embed-text"])
+    if configured is not None and not (
+        configured == _OLD_DEFAULT_DISTANCE and base != "nomic-embed-text"
+    ):
+        max_distance = configured
+    return max_distance, confident
+
+
 def _preference(row) -> tuple[bool, float]:
     return (row["origin"] == "local", row["mtime"])
 
@@ -203,6 +266,24 @@ class Searcher:
         self.embedder = embedder
         self.cfg = cfg or SearchConfig()
         self.last_warning: str | None = None
+        # "low" when even the best result matches the query poorly (see _confidence).
+        self.last_confidence: str | None = None
+        self.last_signals: tuple[float, float] | None = None
+        self._distances: dict[int, float] = {}
+        self._max_distance, self._confident_distance = calibration(
+            getattr(embedder, "name", ""), self.cfg.max_distance
+        )
+
+    def _rarity(self, terms: list[str]) -> dict[str, float]:
+        """Inverse document frequency of each term in this index: a word found in no
+        file at all ("boat" when there is no boat) weighs the most."""
+        total = self.db.chunk_count()
+        out = {}
+        for t in terms[:12]:
+            quoted = '"' + t.replace('"', '""') + '"'
+            match = quoted + (f" OR {t[:5]}*" if len(t) >= 5 and t[:5].isalnum() else "")
+            out[t] = math.log((total + 1) / (self.db.fts_count(match) + 1))
+        return out
 
     def _vector_hits(self, query: str, depth: int) -> list[int]:
         """Chunk ids close in meaning to ``query``, best first.
@@ -226,10 +307,29 @@ class Searcher:
             self.last_warning = f"meaning-based search unavailable ({exc}); keyword only"
             return []
         found = self.db.vector_search(vector, depth)
+        self._distances = dict(found)
         if not found:
             return []
-        cutoff = min(self.cfg.max_distance, found[0][1] + self.cfg.relative_margin)
-        return [cid for cid, dist in found if dist <= cutoff]
+        cutoff = min(self._max_distance, found[0][1] + self.cfg.relative_margin)
+        kept = [cid for cid, dist in found if dist <= cutoff]
+        if not kept:
+            kept = self._standout(found)
+        return kept
+
+    def _standout(self, found: list[tuple[int, float]]) -> list[int]:
+        """The best match when it is a little past the cutoff but far closer than any
+        other file: "renting a flat" for a one-line lease. A clear standout is a strong
+        signal even when the wording shares nothing with the file."""
+        best, best_dist = found[0]
+        if best_dist > self._max_distance + _STANDOUT_SLACK:
+            return []
+        files = self.db.file_ids([cid for cid, _ in found[:50]])
+        other = next((d for c, d in found[1:50] if files.get(c) != files.get(best)), None)
+        if other is not None and other - best_dist < _STANDOUT_GAP:
+            return []
+        return [
+            c for c, d in found[:50] if files.get(c) == files.get(best) and d <= best_dist + 0.05
+        ]
 
     def search(
         self,
@@ -272,6 +372,9 @@ class Searcher:
         if name_match:
             lists.append(([cid for cid, _ in self.db.fts_search(name_match, depth)], 2.0))
         self.last_warning = None
+        self.last_confidence = None
+        self.last_signals = None
+        self._distances: dict[int, float] = {}
         lists.append((self._vector_hits(query, depth), _VECTOR_WEIGHT))
         ranks = fuse(lists)
         if not ranks:
@@ -281,6 +384,8 @@ class Searcher:
         # Grouped by content hash: identical copies of a file are one result.
         best: dict[str, tuple[float, int, object]] = {}
         per_path: dict[str, int] = {}
+        closest: dict[str, float] = {}  # best meaning distance per file
+        texts: dict[str, list[str]] = {}  # matched text per file
         for row in self.db.chunks_with_files(list(ranks)):
             if kind is not None and row["kind"] != kind:
                 continue
@@ -302,6 +407,10 @@ class Searcher:
             # The same file on this computer and in Drive is one result.
             key = row["md5"] or row["sha256"]
             per_path[row["path"]] = per_path.get(row["path"], 0) + 1
+            dist = self._distances.get(row["chunk_id"])
+            if dist is not None and dist < closest.get(key, 9.0):
+                closest[key] = dist
+            texts.setdefault(key, []).append(row["text"])
             prev = best.get(key)
             if (
                 prev is None
@@ -323,6 +432,14 @@ class Searcher:
         )[:limit]
         if not scored:
             return []
+        top = scored[0][1]
+        top_key = top["md5"] or top["sha256"]
+        terms = query_terms(query)
+        text = " ".join([top["name"], *texts.get(top_key, [])])
+        self.last_signals = (coverage(terms, text, self._rarity(terms)), closest.get(top_key, 9.0))
+        cover, distance = self.last_signals
+        low = cover < _MIN_COVERAGE and distance > self._confident_distance
+        self.last_confidence = "low" if low else "high"
         ceiling = scored[0][0]
         hits = []
         for score, row in scored:

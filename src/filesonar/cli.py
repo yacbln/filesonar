@@ -142,6 +142,11 @@ def cmd_doctor(cfg: Config) -> int:
                 else "not set up (run `filesonar setup`)"
             )
             print(f"speech:      {state}")
+        if cfg.media.sounds:
+            sounds = media.SoundTagger(cfg.models_dir)
+            print(
+                f"sounds:      {'ok' if sounds.ready() else 'not set up (run `filesonar setup`)'}"
+            )
     if cfg.drive.enabled:
         from .drive import DriveError, load_token, token_path
 
@@ -180,6 +185,11 @@ def cmd_index(cfg: Config, args: argparse.Namespace) -> int:
         indexer = Indexer(
             cfg, db, OllamaEmbedder(client), OllamaCaptioner(client), progress, _transcriber(cfg)
         )
+        if args.reembed and not args.rebuild:
+            print(
+                f"embedding the indexed text with {cfg.models.embedding_model} ...", file=sys.stderr
+            )
+            print(f"re-embedded {indexer.reembed()} pieces of text")
         report = indexer.run()
         print(report.summary())
         _print_errors(report)
@@ -216,6 +226,8 @@ def cmd_search(cfg: Config, args: argparse.Namespace) -> int:
     if not hits:
         print("no matches")
         return 0
+    if searcher.last_confidence == "low":
+        print("nothing clearly matches; the closest files are:\n")
     for n, hit in enumerate(hits, 1):
         page = f" p.{hit.page}" if hit.page else ""
         where = f"Google Drive: {hit.location}/{hit.name}" if hit.source == "drive" else hit.path
@@ -428,6 +440,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("index", help="index new and changed files")
     s.add_argument("--rebuild", action="store_true", help="start from an empty index")
+    s.add_argument(
+        "--reembed",
+        action="store_true",
+        help="after changing embedding_model: compute the vectors again from the text "
+        "already indexed (much faster than --rebuild; nothing is read again)",
+    )
 
     s = sub.add_parser("search", help="search the index")
     s.add_argument("query", nargs="+")

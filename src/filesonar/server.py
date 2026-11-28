@@ -296,8 +296,9 @@ def build_server(
         """Find the user's files by their content, meaning or metadata (not just their name).
 
         Returns ranked results with the file path, kind, last-modified date, the part of
-        the file that matched and why it matched (text, ocr, caption, speech or metadata).
+        the file that matched and why it matched (text, ocr, caption, speech, sound or metadata).
         Identical copies of a file are one result; `other_copies` lists where else it is.
+        `confidence: "low"` means nothing clearly matches: the user may not have the file.
         Files from Google Drive have `source: "drive"`, their Drive folder in `location`
         and a `link` that only the user can open. To send a result, call prepare_file:
         the paths returned here cannot be attached directly.
@@ -316,6 +317,7 @@ def build_server(
             except ValueError as exc:
                 raise ToolError(str(exc)) from None
             warning = searcher.last_warning
+            confidence = searcher.last_confidence
         results = []
         for h in hits:
             item = h.to_dict()
@@ -333,6 +335,12 @@ def build_server(
                 "prepare_file with its path and attach the path prepare_file returns. "
                 "Files marked too_large_for_chat are sent as a Google Drive link instead "
                 "(prepare_file explains)."
+            )
+        if confidence == "low":
+            result["confidence"] = "low"
+            result["note"] = (
+                "Nothing clearly matches this search: these are only the closest files. "
+                "Tell the user you did not find it, and offer these only as possibilities."
             )
         if warning:
             result["warning"] = warning

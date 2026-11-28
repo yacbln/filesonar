@@ -47,6 +47,16 @@ def test_search_files(server, home):
     assert data["results"][0]["path"] == str(home / "taxes/2023-return.txt")
 
 
+def test_search_says_when_nothing_clearly_matches(server):
+    """Only "return" matches, and "boat" is in no file at all: the closest file comes
+    back flagged, so the agent says it did not find a boat document."""
+    data = call(server, "search_files", {"query": "boat return"})
+    assert data["results"] and data["confidence"] == "low"
+    assert "did not find" in data["note"]
+    sure = call(server, "search_files", {"query": "federal tax return refund"})
+    assert "confidence" not in sure
+
+
 def test_search_with_no_results_has_a_note(server):
     data = call(server, "search_files", {"query": "zzzzqqq", "kind": "image"})
     assert data["results"] == [] and "note" in data

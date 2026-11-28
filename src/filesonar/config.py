@@ -128,7 +128,7 @@ def default_outbox_dir() -> Path:
 @dataclass(frozen=True)
 class ModelConfig:
     host: str = "http://127.0.0.1:11434"
-    embedding_model: str = "nomic-embed-text"
+    embedding_model: str = "embeddinggemma"
     vision_model: str = "qwen2.5vl:7b"
     caption_images: bool = True
     allow_remote_host: bool = False
@@ -152,8 +152,8 @@ class IndexConfig:
 @dataclass(frozen=True)
 class SearchConfig:
     # Cosine distance above which a meaning-only match is dropped as unrelated.
-    # Calibrated for nomic-embed-text; other models may need a different value.
-    max_distance: float = 0.44
+    # None: the value calibrated for the embedding model (see search.CALIBRATION).
+    max_distance: float | None = None
     # Meaning-only matches must also be this close to the best one.
     relative_margin: float = 0.12
 
@@ -192,6 +192,9 @@ class MediaConfig:
     max_minutes: float = 60.0
     # Frames of each video shown to the vision model (0 to skip).
     frames: int = 4
+    # Name the sounds in recordings (rain, applause, a dog barking), so recordings
+    # without speech can be found. Same optional extra as speech recognition.
+    sounds: bool = True
 
 
 @dataclass(frozen=True)
@@ -257,6 +260,8 @@ def _build(cls, table: dict, where: str):
             kwargs[key] = tuple(value)
             continue
         kind: type | tuple[type, ...] = type(default)
+        if default is None:  # optional numbers, such as search.max_distance
+            kind = float
         if kind is float:
             kind = (int, float)
         kwargs[key] = _expect(table, key, kind, where)
@@ -295,7 +300,9 @@ def _validate(cfg: Config) -> None:
     if not 0 <= ix.chunk_overlap < ix.chunk_chars // 2:
         raise ConfigError("index.chunk_overlap must be between 0 and half of chunk_chars")
     s = cfg.search
-    if not 0 < s.max_distance <= 2 or not 0 <= s.relative_margin <= 2:
+    if (
+        s.max_distance is not None and not 0 < s.max_distance <= 2
+    ) or not 0 <= s.relative_margin <= 2:
         raise ConfigError("search.max_distance and search.relative_margin must be in (0, 2]")
     d = cfg.drive
     if d.poll_minutes < 1:
@@ -431,7 +438,7 @@ exclude = []
 # Ollama server. Only addresses on this machine are accepted unless
 # allow_remote_host is set, because file contents are sent to it.
 host = "http://127.0.0.1:11434"
-embedding_model = "nomic-embed-text"
+embedding_model = "embeddinggemma"
 # Describes photos and screenshots so you can search for what they show.
 vision_model = "qwen2.5vl:7b"
 caption_images = true
@@ -448,7 +455,8 @@ skip_dependency_folders = true   # skip folders where software packages were ins
 
 [search]
 # How close (cosine distance) a match by meaning must be. Lower is stricter.
-max_distance = 0.44
+# Calibrated for each supported embedding model; set it only to override.
+# max_distance = 0.60
 
 [drive]
 # Google Drive. Sign in first with `filesonar drive login` (see the README).
@@ -468,6 +476,7 @@ transcribe = true
 speech_model = "base"   # tiny, base, small or medium: bigger is better and slower
 max_minutes = 60        # transcribe at most the first hour of each recording
 frames = 4              # video frames described (0 to skip)
+sounds = true           # name the sounds in recordings: rain, applause, a dog barking
 """
 
 

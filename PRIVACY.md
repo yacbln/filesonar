@@ -24,12 +24,15 @@ filesonar does not:
 - store GPS locations from photos;
 - index secrets such as SSH keys, password stores, browser profiles or `.env` files.
 
-## Speech recognition
+## Speech and sound recognition
 
-If you choose it during `filesonar setup`, a speech-recognition model is downloaded
+If you choose it during `filesonar setup`, a speech-recognition model and a model that
+names sounds (rain, applause, a dog barking) are downloaded
 **once** from Hugging Face (`huggingface.co`, the usual home of open AI models) into
-filesonar's data folder. That download is the only time it is contacted: indexing only
-uses the copy on disk, and no recording, transcript or other data is ever sent there.
+filesonar's data folder. The sound model is pinned to one published version and checked
+against a fixed checksum before it is used. That download is the only time Hugging Face
+is contacted: indexing only uses the copies on disk, and no recording, transcript or
+other data is ever sent there.
 
 ## Google Drive
 

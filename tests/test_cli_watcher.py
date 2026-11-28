@@ -107,32 +107,32 @@ def test_doctor_reports_missing_pieces(config_file, monkeypatch, capsys):
     monkeypatch.setattr(cli.OllamaClient, "installed_models", lambda self: set())
     assert cli.main(["-c", str(config_file), "doctor"]) == 1
     out = capsys.readouterr().out
-    assert "not reachable" in out and "missing: ollama pull nomic-embed-text" in out
+    assert "not reachable" in out and "missing: ollama pull embeddinggemma" in out
 
     monkeypatch.setattr(
-        cli.OllamaClient, "installed_models", lambda self: {"nomic-embed-text", "qwen2.5vl:7b"}
+        cli.OllamaClient, "installed_models", lambda self: {"embeddinggemma", "qwen2.5vl:7b"}
     )
     monkeypatch.setattr(cli.OllamaClient, "loaded_models", lambda self: {})
     assert cli.main(["-c", str(config_file), "doctor"]) == 0
     out = capsys.readouterr().out
-    assert "nomic-embed-text ok" in out and "qwen2.5vl:7b ok" in out
+    assert "embeddinggemma ok" in out and "qwen2.5vl:7b ok" in out
     assert not any(line.endswith(" ") for line in out.splitlines())
     assert "GPU memory" not in out
 
 
 def test_doctor_warns_about_partly_offloaded_model(config_file, monkeypatch, capsys):
     monkeypatch.setattr(
-        cli.OllamaClient, "installed_models", lambda self: {"nomic-embed-text", "qwen2.5vl:7b"}
+        cli.OllamaClient, "installed_models", lambda self: {"embeddinggemma", "qwen2.5vl:7b"}
     )
     monkeypatch.setattr(
         cli.OllamaClient,
         "loaded_models",
-        lambda self: {"qwen2.5vl:7b": (2_900, 6_200), "nomic-embed-text": (400, 400)},
+        lambda self: {"qwen2.5vl:7b": (2_900, 6_200), "embeddinggemma": (400, 400)},
     )
     cli.main(["-c", str(config_file), "doctor"])
     out = capsys.readouterr().out
     assert "qwen2.5vl:7b is only 46% in GPU memory" in out
-    assert "ollama stop qwen2.5vl:7b" in out and "nomic-embed-text is only" not in out
+    assert "ollama stop qwen2.5vl:7b" in out and "embeddinggemma is only" not in out
 
 
 def test_index_progress_is_quiet_by_default(config_file, home, fake_models, capsys):

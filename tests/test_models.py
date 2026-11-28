@@ -28,12 +28,15 @@ def test_embeddings_are_batched_and_prefixed():
         seen.append(body)
         return httpx.Response(200, json={"embeddings": [[0.1, 0.2]] * len(body["input"])})
 
-    emb = OllamaEmbedder(client_with(handler), batch_size=2)
+    emb = OllamaEmbedder(client_with(handler), batch_size=2)  # the default model
     out = emb.embed_documents(["a", "b", "c"])
     assert len(out) == 3 and len(seen) == 2
-    assert seen[0]["input"] == ["search_document: a", "search_document: b"]
-    assert seen[0]["model"] == "nomic-embed-text"
+    assert seen[0]["input"] == ["title: none | text: a", "title: none | text: b"]
+    assert seen[0]["model"] == "embeddinggemma"
     emb.embed_query("q")
+    assert seen[-1]["input"] == ["task: search result | query: q"]
+    nomic = OllamaEmbedder(client_with(handler, embedding_model="nomic-embed-text:latest"))
+    nomic.embed_query("q")
     assert seen[-1]["input"] == ["search_query: q"]
 
 
@@ -44,7 +47,7 @@ def test_unknown_embedding_models_get_no_prefix():
         seen.append(json.loads(request.content))
         return httpx.Response(200, json={"embeddings": [[1.0]]})
 
-    OllamaEmbedder(client_with(handler, embedding_model="mxbai-embed-large")).embed_query("q")
+    OllamaEmbedder(client_with(handler, embedding_model="some-embedder")).embed_query("q")
     assert seen[0]["input"] == ["q"]
 
 

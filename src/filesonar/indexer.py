@@ -30,7 +30,7 @@ from .extract import (
     open_regular_file,
     read_regular_file,
 )
-from .media import Transcriber
+from .media import AUDIO_EXTENSIONS, VIDEO_EXTENSIONS, SoundTagger, Transcriber
 from .models import Captioner, Embedder
 from .pathrules import is_hidden, within
 
@@ -38,12 +38,14 @@ log = logging.getLogger(__name__)
 
 # Bumped when the way some files are read improves; such files already in the index
 # are then read again, once (see Database.upgrade_readers).
-READER_VERSION = 3
+READER_VERSION = 4
 READER_CHANGES = {
     # Web pages as the text a reader sees, without markup and scripts.
     2: (("name", ".html"), ("name", ".htm"), ("name", ".xhtml")),
     # Google Slides per slide and Google Sheets with every sheet (via .pptx / .xlsx).
     3: (("link", "/presentation/"), ("link", "/spreadsheets/")),
+    # Recordings: the sounds in them are named too (rain, applause, a dog barking).
+    4: tuple(("name", ext) for ext in sorted(AUDIO_EXTENSIONS | VIDEO_EXTENSIONS)),
 }
 
 _HASH_BLOCK = 1 << 20
@@ -109,12 +111,16 @@ class Indexer:
         captioner: Captioner | None = None,
         progress: Callable[[str], None] | None = None,
         transcriber: Transcriber | None = None,
+        tagger: SoundTagger | None = None,
     ):
         self.cfg = cfg
         self.db = db
         self.embedder = embedder
         self.captioner = captioner if cfg.models.caption_images else None
         self.transcriber = transcriber if cfg.media.transcribe else None
+        if tagger is None and cfg.media.enabled and cfg.media.sounds:
+            tagger = SoundTagger(cfg.models_dir)
+        self.tagger = tagger if cfg.media.sounds else None
         self.progress = progress or (lambda _msg: None)
         self._vector_ready = False
 
@@ -205,9 +211,11 @@ class Indexer:
         """Everything needed to read a recording fully is installed."""
         if not media.tools_available():
             return False
-        return not self.cfg.media.transcribe or (
+        speech = not self.cfg.media.transcribe or (
             self.transcriber is not None and self.transcriber.available()
         )
+        sounds = not self.cfg.media.sounds or (self.tagger is not None and self.tagger.available())
+        return speech and sounds
 
     def _needs_reread(self, row) -> bool:
         return self._needs_caption(row) or self._needs_ocr(row)
@@ -390,7 +398,7 @@ class Indexer:
                 complete = self._media_ready()
                 if media.tools_available():
                     extraction = extract_media(
-                        path, fd, self.cfg.media, self.captioner, self.transcriber
+                        path, fd, self.cfg.media, self.captioner, self.transcriber, self.tagger
                     )
                 else:
                     extraction = Extraction(kind=kind or "video")
@@ -444,8 +452,31 @@ class Indexer:
                 self.db.delete_path(key)
                 report.removed += 1
 
+    def reembed(self) -> int:
+        """Compute every vector again with the configured embedding model, from the text
+        already in the index: after changing ``embedding_model``, nothing has to be read
+        again. Interrupted, it starts over on the next run. Returns the chunks embedded."""
+        self.db.set_meta("reembedding", self.embedder.name)
+        self.db.drop_vectors()
+        self._vector_ready = False
+        last, done = 0, 0
+        while rows := self.db.chunks_after(last, 512):
+            vectors = self.embedder.embed_documents([f"{r['name']}\n{r['text']}" for r in rows])
+            self._ensure_vectors(vectors[0])
+            self.db.add_vectors([(r["id"], v) for r, v in zip(rows, vectors, strict=True)])
+            last, done = rows[-1]["id"], done + len(rows)
+            self.progress(f"embedded {done} pieces of text")
+        if not done:  # an empty index: the table is made by the first file indexed
+            self.db.drop_vectors()
+        self.db.conn.execute("DELETE FROM meta WHERE key = 'reembedding'")
+        self.db.conn.commit()
+        return done
+
     def run(self) -> IndexReport:
         """Bring the whole index up to date."""
+        if self.db.get_meta("reembedding"):
+            log.info("finishing an interrupted re-embedding first")
+            self.reembed()
         marked = self.db.upgrade_readers(READER_VERSION, READER_CHANGES)
         if marked:
             log.info("reading %d file(s) again: filesonar now reads them better", marked)

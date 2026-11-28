@@ -65,6 +65,27 @@ def test_integer_accepted_for_float_option(tmp_path):
     assert cfg.index.max_file_size_mb == 10.0
 
 
+def test_configs_written_by_earlier_versions_still_load(tmp_path):
+    """Earlier versions wrote max_distance = 0.44 into every config; it must keep loading
+    (an optional setting with a None default once rejected every number)."""
+    old = tmp_path / "config.toml"
+    old.write_text(
+        'roots = ["x"]\n[models]\nembedding_model = "nomic-embed-text"\n'
+        "[search]\nmax_distance = 0.44\nrelative_margin = 0.12\n"
+    )
+    cfg = load_config(old)
+    assert cfg.search.max_distance == 0.44 and cfg.models.embedding_model == "nomic-embed-text"
+    assert (
+        config_from_dict(
+            {"roots": ["x"], "search": {"max_distance": 1}}, base=tmp_path
+        ).search.max_distance
+        == 1.0
+    )
+    assert config_from_dict({"roots": ["x"]}, base=tmp_path).search.max_distance is None
+    with pytest.raises(ConfigError):
+        config_from_dict({"roots": ["x"], "search": {"max_distance": "far"}}, base=tmp_path)
+
+
 @pytest.mark.parametrize(
     "host", ["http://192.168.1.20:11434", "http://example.com", "http://127.0.0.1.evil.com:11434"]
 )

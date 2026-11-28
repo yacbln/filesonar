@@ -36,10 +36,10 @@ sys.path.insert(0, str(HERE))
 from make_corpus import corpus  # noqa: E402
 
 import filesonar  # noqa: E402
-from filesonar.config import ConfigError, config_from_dict, load_config  # noqa: E402
+from filesonar.config import ConfigError, ModelConfig, config_from_dict, load_config  # noqa: E402
 from filesonar.db import Database  # noqa: E402
 from filesonar.indexer import Indexer  # noqa: E402
-from filesonar.media import WhisperTranscriber  # noqa: E402
+from filesonar.media import SoundTagger, WhisperTranscriber  # noqa: E402
 from filesonar.models import OllamaCaptioner, OllamaClient, OllamaEmbedder  # noqa: E402
 from filesonar.search import Searcher  # noqa: E402
 
@@ -77,29 +77,34 @@ def run_method(method: str, searcher: Searcher, db: Database, query: str, limit:
     return [Path(h.path).relative_to(corpus_dir).as_posix() for h in hits]
 
 
-def score(results: list[tuple[dict, list[str]]]) -> dict:
+def score(results: list[tuple[dict, list[str], bool]]) -> dict:
     """top-1, top-3 and MRR over searches that have a right answer; 'absent' searches
-    are right only when nothing comes back."""
-    ranks, absent_ok, absent_n = [], 0, 0
-    for item, got in results:
+    are right when nothing comes back or search says nothing clearly matches.
+    ``false_alarm``: searches with a right answer that were still flagged as unsure."""
+    ranks, absent_ok, absent_n, alarms = [], 0, 0, 0
+    for item, got, unsure in results:
         if not item["want"]:
             absent_n += 1
-            absent_ok += not got
+            absent_ok += not got or unsure
             continue
         ranks.append(next((i for i, g in enumerate(got) if g in item["want"]), None))
+        alarms += unsure and ranks[-1] == 0
     n = len(ranks) or 1
     out = {
         "n": len(ranks),
         "top1": sum(r == 0 for r in ranks) / n,
         "top3": sum(r is not None and r < 3 for r in ranks) / n,
         "mrr": sum(1 / (r + 1) for r in ranks if r is not None) / n,
+        "false_alarm": alarms / n,
     }
     if absent_n:
         out["absent_n"], out["absent_ok"] = absent_n, absent_ok / absent_n
     return out
 
 
-def interval(results: list[tuple[dict, list[str]]], key: str = "top3", rounds: int = 1000) -> tuple:
+def interval(
+    results: list[tuple[dict, list[str], bool]], key: str = "top3", rounds: int = 1000
+) -> tuple:
     """95% bootstrap interval, so small differences are not over-read."""
     rnd = random.Random(1)
     rows = [r for r in results if r[0]["want"]]
@@ -125,13 +130,15 @@ def main() -> int:
     ap.add_argument("--json", type=Path, default=HERE / "results.json")
     ap.add_argument("--limit", type=int, default=10)
     ap.add_argument("--show-misses", action="store_true")
+    ap.add_argument("--embedding-model", default=ModelConfig().embedding_model,
+                    help="embedding model to measure (default: filesonar's default)")  # fmt: skip
     args = ap.parse_args()
 
     try:
         mine = load_config()
         models, media, speech_dir = mine.models, mine.media, mine.models_dir
     except ConfigError:
-        from filesonar.config import MediaConfig, ModelConfig, default_data_dir
+        from filesonar.config import MediaConfig, default_data_dir
 
         models, media, speech_dir = ModelConfig(), MediaConfig(), default_data_dir() / "models"
 
@@ -152,7 +159,7 @@ def main() -> int:
             "roots": [str(corpus_dir)],
             "data_dir": str(root / "data"),
             "outbox_dir": str(root / "outbox"),
-            "models": {"host": models.host, "embedding_model": models.embedding_model,
+            "models": {"host": models.host, "embedding_model": args.embedding_model,
                        "vision_model": models.vision_model, "caption_images": models.caption_images},
             "media": {"speech_model": media.speech_model},
         },
@@ -160,12 +167,15 @@ def main() -> int:
     )  # fmt: skip
     client = OllamaClient(cfg.models)
     speech = WhisperTranscriber(cfg.media.speech_model, speech_dir)
+    sounds = SoundTagger(speech_dir)
+    if not sounds.ready():
+        print("note: sound recognition is not set up, so searches for sounds will miss")
     if not speech.ready():
         print("note: speech recognition is not set up, so spoken searches will miss")
     db = Database(cfg.db_path)
     started = time.monotonic()
     report = Indexer(
-        cfg, db, OllamaEmbedder(client), OllamaCaptioner(client), transcriber=speech
+        cfg, db, OllamaEmbedder(client), OllamaCaptioner(client), transcriber=speech, tagger=sounds
     ).run()
     index_seconds = time.monotonic() - started
     print(f"indexed: {report.summary()}")
@@ -179,7 +189,8 @@ def main() -> int:
             t = time.perf_counter()
             got = run_method(method, searcher, db, item["q"], args.limit, corpus_dir, files)
             times[method].append(time.perf_counter() - t)
-            results[method].append((item, got))
+            unsure = method != "filename" and searcher.last_confidence == "low"
+            results[method].append((item, got, unsure))
     db.close()
 
     def ext_of(item):
@@ -190,9 +201,10 @@ def main() -> int:
         "filesonar_version": filesonar.__version__,
         "machine": machine(),
         "models": {
-            "embedding": models.embedding_model,
+            "embedding": args.embedding_model,
             "vision": models.vision_model,
             "speech": cfg.media.speech_model if speech.ready() else None,
+            "sounds": SoundTagger.name if sounds.ready() else None,
         },
         "files": len(files),
         "searches": len(searches),
@@ -222,7 +234,7 @@ def main() -> int:
         print(f"\nreport written to {args.report}")
     if args.show_misses:
         print("\nfilesonar searches where the right file was not in the top 3:")
-        for item, got in results["filesonar"]:
+        for item, got, _unsure in results["filesonar"]:
             if item["want"] and not any(g in item["want"] for g in got[:3]):
                 print(f"  [{item['cat']}] {item['q']!r} -> {got[:2]}")
     return 0
@@ -234,6 +246,10 @@ def print_table(s: dict) -> None:
     print(f"{'top-3':12}" + "".join(f"{s['methods'][m]['all']['top3']:>18.0%}" for m in METHODS))
     print(f"{'MRR':12}" + "".join(f"{s['methods'][m]['all']['mrr']:>18.2f}" for m in METHODS))
     print(f"{'ms/search':12}" + "".join(f"{s['methods'][m]['median_ms']:>18}" for m in METHODS))
+    print(
+        f"{'false alarm':12}"
+        + "".join(f"{s['methods'][m]['all']['false_alarm']:>18.1%}" for m in METHODS)
+    )
     print("\ntop-3 by kind of search:")
     for kind in [*KINDS, "absent"]:
         row = s["methods"]["filesonar"]["by_kind"].get(kind)
@@ -250,7 +266,8 @@ def markdown(s: dict) -> str:
         f"# filesonar benchmark ({s['files']} files, {s['searches']} searches)",
         "",
         f"filesonar {s['filesonar_version']} on {s['machine']}. Models: {s['models']['embedding']} "
-        f"(text), {s['models']['vision']} (pictures), whisper {s['models']['speech']} (speech). "
+        f"(text), {s['models']['vision']} (pictures), whisper {s['models']['speech']} (speech), "
+        f"{s['models'].get('sounds') or 'none'} (sounds). "
         f"Indexing took {s['index_seconds'] // 60} min {s['index_seconds'] % 60} s.",
         "",
         "| | " + " | ".join(METHODS) + " |",
@@ -268,6 +285,8 @@ def markdown(s: dict) -> str:
     lines.append(
         "| Time per search | " + " | ".join(f"{m[x]['median_ms']} ms" for x in METHODS) + " |"
     )
+    lines.append("| Right file first, yet flagged unsure | " + " | ".join(
+        f"{m[x]['all']['false_alarm']:.1%}" for x in METHODS) + " |")  # fmt: skip
     lines += ["", "## Right file in the top 3, by kind of search", "",
               "| Kind | Searches | " + " | ".join(METHODS) + " |", "|---|---|" + "---|" * len(METHODS)]  # fmt: skip
     for kind in [*KINDS, "absent"]:
@@ -281,6 +300,9 @@ def markdown(s: dict) -> str:
             + " | ".join(f"{m[x]['by_kind'][kind].get(key, 0):.0%}" for x in METHODS)
             + " |"
         )
+    lines += ["", "*absent*: searches for things that are not there. They count as right when "
+              "nothing comes back or the search says nothing clearly matches "
+              "(`confidence: low`)."]  # fmt: skip
     lines += ["", "## filesonar by file type (right file in the top 3)", "", "| Type | Searches | Top 1 | Top 3 |",
               "|---|---|---|---|"]  # fmt: skip
     for ext, row in m["filesonar"]["by_type"].items():

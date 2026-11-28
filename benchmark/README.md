@@ -66,7 +66,7 @@ accepts any version of the résumé, "photos of our dog" any photo of a dog. Kin
 | typo | "reciept for the dishwaser" |
 | vague | "car stuff", "stuff from our trip to Japan" |
 | language | "my old lease in Montreal", "contrat de location" |
-| absent | "boat registration": nothing like it exists, so the right answer is no result |
+| absent | "boat registration": nothing like it exists, so the right answer is no result, or results marked as low confidence |
 
 Searches are written apart from the documents' own wording, the way a person remembers a
 file rather than quoting it.
@@ -83,7 +83,16 @@ file rather than quoting it.
 All four search the same index, so the differences come from the search method alone. For
 each search the benchmark checks where the first right file appears: first (top 1), in
 the first three (what the agent shows you), and the mean reciprocal rank. Ranges are 95%
-bootstrap intervals.
+bootstrap intervals. "False alarm" is the share of searches whose right file came first
+but which were still marked low confidence.
+
+It runs with filesonar's default models (`--embedding-model` measures another one). When
+the default changed to `embeddinggemma`, it was compared here with `nomic-embed-text`,
+`qwen3-embedding:0.6b`, `mxbai-embed-large` and `bge-m3` on the same index: it put the
+right file first most often (about 91% against 86-88% for the others), and it was then
+confirmed on a real 16,000-file index with `scripts/eval_search.py`. Every change to
+ranking is checked on both, and the searches are split in two halves so a change has to
+help both, not just the searches it was tuned on.
 
 ## What it does and does not show
 
@@ -93,8 +102,11 @@ bootstrap intervals.
   documents' wording, but they are not a survey of real users.
 - Recordings use synthesized speech (flite). It is robotic rather than clean: speech
   recognition gets about one word in five wrong, more than on a clear human voice.
-- Absent searches show whether filesonar can say "nothing found". It returns its closest
-  matches today, so it scores poorly there; this is listed as a known gap.
+- Absent searches show whether filesonar can say "nothing found". Near misses (a
+  "COVID test result" when there are other test results) still come back as confident
+  matches.
+- The recordings of sounds are short, clean clips; a phone recording at a noisy party
+  is harder.
 
 Contributions that make it harder or more realistic are welcome: more families,
 better searches, other languages.

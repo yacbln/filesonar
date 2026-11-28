@@ -31,8 +31,8 @@ Optionally, it can also index your [Google Drive](#google-drive) — the files a
 | PowerPoint (`.pptx`), LibreOffice Impress (`.odp`) | Text of each slide, with speaker notes; results point to the slide |
 | Excel (`.xlsx`), LibreOffice Calc (`.ods`) | Every sheet, row by row, with the sheet name |
 | E-books (`.epub`) | Chapters in reading order, title and author |
-| Videos (`.mp4`, `.mov`, `.mkv`, `.webm`, …) | What is said (speech recognition on this computer, with time marks), what is shown (a few frames described by the vision model), duration, resolution and recording date |
-| Audio (`.mp3`, `.m4a`, `.wav`, `.ogg`/`.opus` voice notes, …) | What is said; music is found by its title, artist and album rather than by misheard "lyrics" |
+| Videos (`.mp4`, `.mov`, `.mkv`, `.webm`, …) | What is said (speech recognition on this computer, with time marks), what it sounds like, what is shown (a few frames described by the vision model), duration, resolution and recording date |
+| Audio (`.mp3`, `.m4a`, `.wav`, `.ogg`/`.opus` voice notes, …) | What is said, and what it sounds like (rain, applause, a dog barking, piano: 527 everyday sounds, recognised on this computer); music is also found by its title, artist and album rather than by misheard "lyrics" |
 | Images (`.jpg`, `.png`, `.webp`, `.gif`, `.bmp`, `.tiff`) | A local vision model describes what the picture shows; OCR reads any text (receipts, screenshots, slides); date and camera from EXIF |
 | Web pages (`.html`) | What a reader sees: no markup, scripts or styles |
 | Text (`.txt`, `.md`, `.csv`, `.json`, …) | As is |
@@ -43,33 +43,35 @@ With [Google Drive](#google-drive) enabled, the same goes for files in your Driv
 
 On a [benchmark](benchmark/README.md) of about 1,000 realistic personal files (bills,
 statements, receipts photographed on a phone, scans, handwritten notes, photos, voice
-memos, videos) and 420 searches phrased the way people ask, filesonar puts the right
-file in its top 3 **94%** of the time, and first **86%** of the time. Searching by file
-name, which is what a file manager does, manages 40%.
+memos, recordings, videos) and 420 searches phrased the way people ask, filesonar puts
+the right file in its top 3 **98%** of the time, and first **94%** of the time.
+Searching by file name, which is what a file manager does, manages 40%.
 
 | Kind of search | By file name | filesonar |
 |---|---|---|
 | Describing the file ("the water bill from this past March") | 71% | 99% |
-| A question about what is inside ("how much did I pay for the air fryer") | 39% | 100% |
-| Text only in a picture: receipts, scans, screenshots, handwriting | 16% | 95% |
+| A question about what is inside ("how much did I pay for the air fryer") | 39% | 99% |
+| Text only in a picture: receipts, scans, screenshots, handwriting | 16% | 100% |
 | Photos by what they show ("sunset at the beach") | 0% | 98% |
 | Voice memos and videos by what is said or shown | 25% / 0% | 94% / 100% |
-| Misspelled ("reciept for the dishwaser") | 50% | 83% |
-| **All searches** | **40%** | **94%** |
+| Recordings by their sound ("recording of rain", "dog barking") | 8% | 100% |
+| Misspelled ("reciept for the dishwaser") | 50% | 92% |
+| **All searches** | **40%** | **98%** |
 
-Right file in the top 3. Full results, including keyword-only and meaning-only search,
-are in [benchmark/results/REPORT.md](benchmark/results/REPORT.md); you can run it
-yourself with `python benchmark/run.py`.
+Right file in the top 3. For 20 searches for things that are not there ("boat
+registration"), filesonar says that nothing clearly matches 80% of the time; it wrongly
+says so for 1.5% of searches whose file it ranked first. Full results, including
+keyword-only and meaning-only search, are in
+[benchmark/results/REPORT.md](benchmark/results/REPORT.md); you can run it yourself with
+`python benchmark/run.py`.
 
 What it does not do well yet:
 
-- **Sounds without speech** (rain, music, a dog barking) are not recognised, so they
-  are found only by name: 0% on the benchmark.
-- **Things you do not have**: it returns the closest matches rather than "nothing found".
-- On this benchmark, meaning-only search puts the right file first slightly more often
-  (88% vs 86%). filesonar combines it with keyword search because on real collections
-  exact words, names and codes matter, and keyword search finds those where meaning
-  search alone does not.
+- **Near misses** for things you do not have: "COVID test result" when you only have
+  other blood tests still comes back as a confident match.
+- **Very vague searches** ("that thing about the apartment") and **ordinals** ("the
+  first paycheck of the year") can miss.
+- Short voice memos depend on how well speech recognition heard them.
 
 The documents in the benchmark are generated; the photos, sounds and handwriting fonts
 are real. Everything in it is made up or public domain.
@@ -94,7 +96,7 @@ filesonar setup
 
 `setup` asks a few questions and does the rest. Each step checks first and only changes what is missing, so it is safe to run again — and running it after `pipx upgrade filesonar` is how an upgrade takes effect. It:
 
-1. checks that Ollama runs, and downloads the text model `nomic-embed-text` (274 MB). It offers the vision model `qwen2.5vl:7b` that describes photos (about 6 GB, best with a GPU);
+1. checks that Ollama runs, and downloads the text model `embeddinggemma` (621 MB). It offers the vision model `qwen2.5vl:7b` that describes photos (about 6 GB, best with a GPU);
 2. checks for [Tesseract](https://github.com/tesseract-ocr/tesseract), which reads text in scans and screenshots, and prints the install command if it is missing (`sudo apt install tesseract-ocr`; add `tesseract-ocr-fra`, `-ara`, … for other languages). Setup never runs `sudo` itself;
 3. writes `~/.config/filesonar/config.toml` with the folders you choose (by default Documents, Pictures, Downloads and Desktop, if they exist);
 4. optionally connects [Google Drive](#google-drive);
@@ -234,7 +236,7 @@ exclude = []                  # e.g. ["**/old-backups/**", "*.log"]
 
 [models]
 host = "http://127.0.0.1:11434"
-embedding_model = "nomic-embed-text"
+embedding_model = "embeddinggemma"
 vision_model = "qwen2.5vl:7b"
 caption_images = true
 allow_remote_host = false     # see "Privacy and security"
@@ -253,7 +255,8 @@ chunk_chars = 1200
 chunk_overlap = 200
 
 [search]
-max_distance = 0.44           # how close a meaning-only match must be (lower = stricter)
+# max_distance = 0.60         # how close a meaning-only match must be (lower = stricter);
+                              # calibrated for each supported model, set only to override
 relative_margin = 0.12
 ```
 
@@ -261,7 +264,7 @@ Your `exclude` patterns are added to the defaults rather than replacing them. Fo
 
 Unknown options are rejected instead of silently ignored, so a typo never turns a setting off.
 
-If you switch `embedding_model`, rebuild the index with `filesonar index --rebuild`; filesonar refuses to mix vectors from different models. `max_distance` is tuned for `nomic-embed-text` — other embedding models may need a different value.
+If you switch `embedding_model`, run `filesonar index --reembed`: it computes the vectors again from the text already in the index (minutes, not hours; nothing is read or described again). filesonar refuses to mix vectors from different models. `max_distance` is calibrated for `embeddinggemma` (the default since 0.4.0) and `nomic-embed-text` (the default before); other models may need a value of their own.
 
 ## Privacy and security
 
@@ -273,7 +276,7 @@ filesonar reads your personal files, so it is built to be boring and predictable
 - **No symlink surprises.** Symbolic links are never followed, and a file whose real location is outside your indexed folders is skipped.
 - **The agent only sees the index.** The MCP server never opens a path that is not in the index, returns short snippets (and at most a 2,000-character preview), and tells the agent to treat file contents as data rather than instructions — a defence against documents that try to give orders to AI assistants.
 - **`prepare_file` can only copy, and only into its outbox.** It copies files that are in the index and still allowed by your config, reads them without following symlinks, writes `0600` copies into `0700` folders inside `outbox_dir`, never writes through a symlink, and only ever deletes its own copies older than 24 hours. Your original files are never modified. The outbox is never indexed.
-- **Recordings stay on your machine.** Speech is recognised locally; the speech model is downloaded once during setup (from Hugging Face) and indexing never goes online. Videos in Google Drive are described from Drive's preview image and details, without downloading them.
+- **Recordings stay on your machine.** Speech and sounds are recognised locally; the speech and sound models are downloaded once during setup (from Hugging Face) and indexing never goes online. Videos in Google Drive are described from Drive's preview image and details, without downloading them.
 - **GPS coordinates are not stored.** Photo dates and camera models are, locations are not.
 - **The index is private.** It is a single SQLite file created with `0600` permissions inside a `0700` folder. Delete it at any time; it can be rebuilt from your files.
 - **Defensive parsing.** Images that would decode to more than ~90 megapixels, password-protected PDFs, oversized files and binary files with text extensions are skipped rather than processed.
@@ -294,6 +297,8 @@ Found a problem? Please see [SECURITY.md](https://github.com/yacbln/filesonar/bl
 
 - Changes are detected by size and modification time first and confirmed with a SHA-256 of the content, so unchanged files are never read twice and a moved file keeps its index entry.
 - Keyword and meaning results are merged with reciprocal rank fusion. Matches by meaning only count if they are genuinely close; otherwise unrelated searches would always "find" something.
+- When even the best result shares few of the search's rarer words and is not close in meaning, results come back marked `confidence: "low"`, and the agent is told to say the file was not found rather than offer a wrong one with confidence.
+- Sounds in recordings are named by the [Audio Spectrogram Transformer](https://github.com/YuanGongND/ast) (Gong et al., MIT; BSD-3-Clause), fine-tuned on Google's AudioSet, running on this computer.
 - What the search itself says counts too: "photos of …" or "voice memo …" favours that kind of file, "May 2023" favours files that mention that month, and a code such as a booking reference favours the file that contains it exactly.
 - If Ollama is not running, search keeps working with keywords only and says so.
 

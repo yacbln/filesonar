@@ -301,3 +301,41 @@ def test_named_kind_and_date_break_ties(home, indexer, searcher, monkeypatch):
     write(home / "Travel" / "b.txt", "Flight booking. Booking reference: R58VJ5")
     indexer.run()
     assert searcher.search("booking reference R58VJ5")[0].name == "b.txt"
+
+
+def test_confidence_reflects_how_well_the_best_result_matches(corpus, searcher):
+    searcher.search("car insurance policy")
+    assert searcher.last_confidence == "high"
+    # Only the common word matches; the word that says what is wanted is in no file.
+    searcher.search("giraffe policy")
+    assert searcher.last_confidence == "low"
+    assert searcher.search("car insurance", kind="video") == []  # no videos here
+    assert searcher.last_confidence is None  # nothing returned, nothing to judge
+
+
+@pytest.mark.parametrize(
+    ("query", "terms"),
+    [
+        ("photos of our dog", ["dog"]),
+        ("where's my car insurance policy", ["car", "insurance", "policy"]),
+        ("voice memo about the mechanic", ["mechanic"]),
+        ("the W-2 from 2023", ["2023"]),
+    ],
+)
+def test_query_terms(query, terms):
+    from filesonar.search import query_terms
+
+    assert query_terms(query) == terms
+
+
+def test_each_embedding_model_has_its_own_cutoffs():
+    from filesonar.search import calibration
+
+    assert calibration("embeddinggemma", None) == (0.60, 0.55)
+    assert calibration("embeddinggemma:latest", None) == (0.60, 0.55)
+    assert calibration("nomic-embed-text", None) == (0.44, 0.35)
+    # 0.44 in an older config was nomic's default, not a choice for another model.
+    assert calibration("embeddinggemma", 0.44)[0] == 0.60
+    assert calibration("nomic-embed-text", 0.5)[0] == 0.5  # a real choice is kept
+    assert calibration("embeddinggemma", 0.5)[0] == 0.5
+    assert calibration("some-new-model", None) == (0.44, 0.35)
